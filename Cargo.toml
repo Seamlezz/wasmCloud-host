@@ -1,0 +1,39 @@
+[workspace]
+resolver = "3"
+members = ["crates/plugins/surrealdb/", "crates/runtime/"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+repository = "https://github.com/Seamlezz/wasmCloud-host"
+license = "Unlicense"
+rust-version = "1.91.0"
+
+[workspace.dependencies]
+# wash-runtime 2.x is not on crates.io yet (upstream publish = false). Pin to release tag.
+wash-runtime = { git = "https://github.com/wasmCloud/wasmCloud", tag = "v2.2.1", default-features = false, features = [
+    "washlet",
+    "wasi-config",
+    "wasi-logging",
+    "wasi-blobstore",
+    "wasi-keyvalue",
+    "wasi-otel",
+    "wasip3",
+] }
+async-nats = { version = "0.47", default-features = false, features = ["aws-lc-rs", "jetstream", "kv", "object-store", "service"] }
+async-trait = { version = "0.1", default-features = false }
+anyhow = { version = "1", default-features = false }
+tokio = { version = "1", default-features = false, features = ["full"] }
+futures-util = { version = "0.3", default-features = false }
+tracing = { version = "0.1", default-features = false, features = ["attributes"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+humantime = { version = "2.3" }
+surrealdb = { version = "3", default-features = false, features = ["kv-mem", "protocol-http", "rustls"] }
+surrealdb-host-adapter = "0.6.0"
+surrealdb-types = "3"
+wasmtime = { version = "44", default-features = false, features = [
+    "component-model",
+    "component-model-async",
+] }
+wasmcloud-plugin-surrealdb = { path = "crates/plugins/surrealdb" }

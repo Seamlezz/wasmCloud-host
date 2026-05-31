@@ -1,0 +1,27 @@
+[package]
+name = "wasmcloud-plugin-surrealdb"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "wasmCloud host plugin for seamlezz:surrealdb/call@0.2.0"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+wash-runtime = { workspace = true, default-features = false, features = [] }
+wasmtime = { workspace = true }
+async-trait = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true, features = ["sync", "macros", "rt"] }
+futures-util = { workspace = true }
+tracing = { workspace = true }
+surrealdb = { workspace = true }
+surrealdb-host-adapter = { workspace = true }
+surrealdb-types = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+futures-util = { workspace = true }

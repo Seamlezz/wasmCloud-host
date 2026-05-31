@@ -1,0 +1,192 @@
+use std::collections::HashMap;
+
+use anyhow::{Context as _, bail};
+use surrealdb::Surreal;
+use surrealdb::engine::any::Any;
+use surrealdb::opt::auth::Root;
+
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+pub struct ConnectionKey {
+    pub url: String,
+    pub namespace: String,
+    pub database: String,
+    pub username: Option<String>,
+    pub password: Option<String>,
+}
+
+impl ConnectionKey {
+    pub fn from_config(config: &HashMap<String, String>) -> anyhow::Result<Self> {
+        let url = config
+            .get("url")
+            .context("seamlezz:surrealdb requires 'url' in host_interfaces config")?
+            .clone();
+        let namespace = config
+            .get("namespace")
+            .context("seamlezz:surrealdb requires 'namespace' in host_interfaces config")?
+            .clone();
+        let database = config
+            .get("database")
+            .context("seamlezz:surrealdb requires 'database' in host_interfaces config")?
+            .clone();
+
+        if url.is_empty() {
+            bail!("seamlezz:surrealdb 'url' must not be empty");
+        }
+        if namespace.is_empty() {
+            bail!("seamlezz:surrealdb 'namespace' must not be empty");
+        }
+        if database.is_empty() {
+            bail!("seamlezz:surrealdb 'database' must not be empty");
+        }
+
+        let username = config.get("username").cloned().filter(|v| !v.is_empty());
+        let password = config.get("password").cloned().filter(|v| !v.is_empty());
+
+        if username.is_some() && password.is_none() {
+            bail!("seamlezz:surrealdb 'password' is required when 'username' is set");
+        }
+
+        Ok(Self {
+            url,
+            namespace,
+            database,
+            username,
+            password,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn valid_minimal_config() {
+        let cfg = config(&[("url", "memory"), ("namespace", "ns"), ("database", "db")]);
+        let key = ConnectionKey::from_config(&cfg).unwrap();
+        assert_eq!(key.url, "memory");
+        assert_eq!(key.namespace, "ns");
+        assert_eq!(key.database, "db");
+        assert!(key.username.is_none());
+        assert!(key.password.is_none());
+    }
+
+    #[test]
+    fn valid_with_credentials() {
+        let cfg = config(&[
+            ("url", "memory"),
+            ("namespace", "ns"),
+            ("database", "db"),
+            ("username", "admin"),
+            ("password", "secret"),
+        ]);
+        let key = ConnectionKey::from_config(&cfg).unwrap();
+        assert_eq!(key.username.as_deref(), Some("admin"));
+        assert_eq!(key.password.as_deref(), Some("secret"));
+    }
+
+    #[test]
+    fn missing_url() {
+        let cfg = config(&[("namespace", "ns"), ("database", "db")]);
+        let err = ConnectionKey::from_config(&cfg).unwrap_err();
+        assert!(err.to_string().contains("url"));
+    }
+
+    #[test]
+    fn missing_namespace() {
+        let cfg = config(&[("url", "memory"), ("database", "db")]);
+        let err = ConnectionKey::from_config(&cfg).unwrap_err();
+        assert!(err.to_string().contains("namespace"));
+    }
+
+    #[test]
+    fn missing_database() {
+        let cfg = config(&[("url", "memory"), ("namespace", "ns")]);
+        let err = ConnectionKey::from_config(&cfg).unwrap_err();
+        assert!(err.to_string().contains("database"));
+    }
+
+    #[test]
+    fn empty_url() {
+        let cfg = config(&[("url", ""), ("namespace", "ns"), ("database", "db")]);
+        let err = ConnectionKey::from_config(&cfg).unwrap_err();
+        assert!(err.to_string().contains("url"));
+    }
+
+    #[test]
+    fn empty_namespace() {
+        let cfg = config(&[("url", "memory"), ("namespace", ""), ("database", "db")]);
+        let err = ConnectionKey::from_config(&cfg).unwrap_err();
+        assert!(err.to_string().contains("namespace"));
+    }
+
+    #[test]
+    fn empty_database() {
+        let cfg = config(&[("url", "memory"), ("namespace", "ns"), ("database", "")]);
+        let err = ConnectionKey::from_config(&cfg).unwrap_err();
+        assert!(err.to_string().contains("database"));
+    }
+
+    #[test]
+    fn username_without_password() {
+        let cfg = config(&[
+            ("url", "memory"),
+            ("namespace", "ns"),
+            ("database", "db"),
+            ("username", "admin"),
+        ]);
+        let err = ConnectionKey::from_config(&cfg).unwrap_err();
+        assert!(err.to_string().contains("password"));
+    }
+
+    #[test]
+    fn empty_username_ignored() {
+        let cfg = config(&[
+            ("url", "memory"),
+            ("namespace", "ns"),
+            ("database", "db"),
+            ("username", ""),
+        ]);
+        let key = ConnectionKey::from_config(&cfg).unwrap();
+        assert!(key.username.is_none());
+    }
+
+    #[test]
+    fn empty_password_ignored() {
+        let cfg = config(&[
+            ("url", "memory"),
+            ("namespace", "ns"),
+            ("database", "db"),
+            ("password", ""),
+        ]);
+        let key = ConnectionKey::from_config(&cfg).unwrap();
+        assert!(key.password.is_none());
+    }
+}
+
+pub async fn connect(key: &ConnectionKey) -> anyhow::Result<Surreal<Any>> {
+    let db: Surreal<Any> = Surreal::init();
+    db.connect(&key.url).await?;
+    db.use_ns(&key.namespace).use_db(&key.database).await?;
+
+    if let Some(username) = &key.username {
+        let password = key
+            .password
+            .clone()
+            .context("username set but password missing")?;
+        db.signin(Root {
+            username: username.clone(),
+            password,
+        })
+        .await?;
+    }
+
+    Ok(db)
+}

@@ -37,6 +37,46 @@ func (m *WasmcloudHost) Build(
 	return m.runtimeImageForPlatform(platform)
 }
 
+func (m *WasmcloudHost) RuntimeVersion(ctx context.Context) (string, error) {
+	return workspaceVersion(ctx, m.Source.File("Cargo.toml"))
+}
+
+func (m *WasmcloudHost) PublishIfNeeded(
+	ctx context.Context,
+	registry string,
+	image string,
+	username string,
+	password *dagger.Secret,
+	// +optional
+	force bool,
+	// +optional
+	dryRun bool,
+	// +optional
+	// +default=true
+	includeLatest bool,
+) (string, error) {
+	version, err := m.RuntimeVersion(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	if !force {
+		exists, err := imageTagExists(ctx, registry, image, version, username, password)
+		if err != nil {
+			return "", err
+		}
+		if exists {
+			return fmt.Sprintf("skipped: %s/%s:%s already exists", registry, image, version), nil
+		}
+	}
+
+	if dryRun {
+		return fmt.Sprintf("dry-run: would publish %s/%s:%s", registry, image, version), nil
+	}
+
+	return m.Publish(ctx, registry, image, version, username, password, includeLatest)
+}
+
 func (m *WasmcloudHost) Publish(
 	ctx context.Context,
 	registry string,

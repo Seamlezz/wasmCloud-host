@@ -6,51 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  version:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.changed.outputs.version }}
-      publish: ${{ steps.changed.outputs.publish }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: Read workspace version and detect bump
-        id: changed
-        run: |
-          set -euo pipefail
-          workspace_version() {
-            cargo metadata --no-deps --format-version=1 --manifest-path "$1" \
-              | jq -r '.packages[] | select(.name=="wasmcloud-host-runtime") | .version'
-          }
-          NEW=$(workspace_version Cargo.toml)
-          echo "version=$NEW" >> "$GITHUB_OUTPUT"
-
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if ! git rev-parse HEAD^ >/dev/null 2>&1; then
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          git show HEAD^:Cargo.toml > /tmp/prev-Cargo.toml
-          OLD=$(workspace_version /tmp/prev-Cargo.toml)
-
-          if [ "$OLD" != "$NEW" ]; then
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-          fi
-
   publish:
-    needs: version
-    if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -58,19 +14,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Dagger publish
+      - name: Dagger publish if needed
         uses: dagger/dagger-for-github@v7
         with:
           version: "0.21.3"
           verb: call
           args: >-
-            publish
+            publish-if-needed
             --registry=ghcr.io
             --image=seamlezz/wasmcloud-host
-            --tag=${{ needs.version.outputs.version }}
             --include-latest=true
             --username=${{ github.actor }}
             --password=env:GITHUB_TOKEN
+            --force=${{ github.event_name == 'workflow_dispatch' }}
             --source=.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -61,25 +61,54 @@ WASI P3 and OpenTelemetry stay on unless disabled with `--wasip3=false` / `--was
 
 Published to **`ghcr.io/seamlezz/wasmcloud-host`** (`linux/amd64`, `linux/arm64`). Tags: workspace version from `Cargo.toml` and `latest`.
 
-CI (`.github/workflows/publish-runtime.yml`) publishes on push to `main` when `[workspace.package].version` changes. **workflow_dispatch** rebuilds the current version without a bump.
+CI (`.github/workflows/publish-runtime.yml`) publishes on push to `main` when the version tag does not already exist in GHCR. **workflow_dispatch** forces a republish with `--force=true`.
 
-Local build ([Dagger CLI](https://docs.dagger.io/install)):
+### Local development
+
+Read the current runtime version:
 
 ```bash
-dagger call runtime-image --platform=linux/amd64 with-exec --args=/usr/local/bin/wasmcloud-host stdout
+dagger call runtime-version
 ```
 
-Publish (needs `write:packages` token):
+Dry-run: check whether CI would publish (no push, requires `packages: read` token):
 
 ```bash
-export GITHUB_TOKEN=ghp_...
-dagger call build-and-push \
+dagger call publish-if-needed \
+  --dry-run=true \
+  --registry=ghcr.io \
+  --image=seamlezz/wasmcloud-host \
+  --username=YOUR_GH_USER \
+  --password=env://GITHUB_TOKEN
+```
+
+Publish a specific tag manually:
+
+```bash
+dagger call publish \
   --registry=ghcr.io \
   --image=seamlezz/wasmcloud-host \
   --tag=0.1.0 \
   --username=YOUR_GH_USER \
   --password=env://GITHUB_TOKEN \
   --include-latest=true
+```
+
+Force republish the current version (skips registry existence check):
+
+```bash
+dagger call publish-if-needed \
+  --force=true \
+  --registry=ghcr.io \
+  --image=seamlezz/wasmcloud-host \
+  --username=YOUR_GH_USER \
+  --password=env://GITHUB_TOKEN
+```
+
+Build a single-platform image and inspect it:
+
+```bash
+dagger call build --platform=linux/amd64 with-exec --args=/usr/local/bin/wasmcloud-host stdout
 ```
 
 ## Development

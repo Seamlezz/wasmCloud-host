@@ -19,6 +19,7 @@ jobs:
         with:
           version: "0.21.3"
           verb: call
+          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
           args: >-
             publish-if-needed
             --registry=ghcr.io
@@ -29,4 +30,3 @@ jobs:
             --force=${{ github.event_name == 'workflow_dispatch' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DAGGER_CLOUD_TOKEN: ${{ secrets.DAGGER_CLOUD_TOKEN }}

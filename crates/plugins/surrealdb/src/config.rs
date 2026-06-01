@@ -56,6 +56,26 @@ impl ConnectionKey {
     }
 }
 
+pub async fn connect(key: &ConnectionKey) -> anyhow::Result<Surreal<Any>> {
+    let db: Surreal<Any> = Surreal::init();
+    db.connect(&key.url).await?;
+    db.use_ns(&key.namespace).use_db(&key.database).await?;
+
+    if let Some(username) = &key.username {
+        let password = key
+            .password
+            .clone()
+            .context("username set but password missing")?;
+        db.signin(Root {
+            username: username.clone(),
+            password,
+        })
+        .await?;
+    }
+
+    Ok(db)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,24 +189,4 @@ mod tests {
         let key = ConnectionKey::from_config(&cfg).unwrap();
         assert!(key.password.is_none());
     }
-}
-
-pub async fn connect(key: &ConnectionKey) -> anyhow::Result<Surreal<Any>> {
-    let db: Surreal<Any> = Surreal::init();
-    db.connect(&key.url).await?;
-    db.use_ns(&key.namespace).use_db(&key.database).await?;
-
-    if let Some(username) = &key.username {
-        let password = key
-            .password
-            .clone()
-            .context("username set but password missing")?;
-        db.signin(Root {
-            username: username.clone(),
-            password,
-        })
-        .await?;
-    }
-
-    Ok(db)
 }

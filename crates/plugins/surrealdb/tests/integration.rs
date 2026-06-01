@@ -81,8 +81,7 @@ async fn plugin_subscribe_stream_lifecycle() {
     let mut stream = Box::pin(stream);
 
     let first = tokio::time::timeout(Duration::from_secs(3), stream.next()).await;
-    match first {
-        Ok(Some(Err(e))) => panic!("subscribe stream error: {e:?}"),
-        _ => {}
+    if let Ok(Some(Err(e))) = first {
+        panic!("subscribe stream error: {e:?}");
     }
 }

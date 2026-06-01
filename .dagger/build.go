@@ -36,7 +36,7 @@ func (m *WasmcloudHost) container(platform dagger.Platform) *dagger.Container {
 
 func (m *WasmcloudHost) withChecks(platform dagger.Platform) *dagger.Container {
 	return m.container(platform).
-		WithExec([]string{"cargo", "clippy", "--", "-D", "warnings"}).
+		WithExec([]string{"cargo", "clippy", "--all-targets", "--", "-D", "warnings"}).
 		WithExec([]string{"cargo", "test"})
 }
 

@@ -74,6 +74,14 @@ func (m *WasmcloudHost) PublishIfNeeded(
 		return fmt.Sprintf("dry-run: would publish %s/%s:%s", registry, image, version), nil
 	}
 
+	check, err := m.Check(ctx)
+	if err != nil {
+		return "", err
+	}
+	if _, err := check.Sync(ctx); err != nil {
+		return "", err
+	}
+
 	return m.Publish(ctx, registry, image, version, username, password, includeLatest)
 }
 

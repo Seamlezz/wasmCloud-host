@@ -41,7 +41,7 @@ func (m *WasmcloudHost) withChecks(platform dagger.Platform) *dagger.Container {
 }
 
 func (m *WasmcloudHost) buildBinary(platform dagger.Platform) *dagger.Container {
-	return m.withChecks(platform).
+	return m.container(platform).
 		WithExec([]string{
 			"cargo", "build", "--release",
 			"-p", "wasmcloud-host-runtime",

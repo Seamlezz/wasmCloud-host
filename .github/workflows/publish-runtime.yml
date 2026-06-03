@@ -16,7 +16,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - name: Dagger check needs publish
+      - name: Dagger check
         uses: memospot/action-dagger@v1
         with:
           version: "latest"
@@ -57,7 +57,7 @@ jobs:
             echo "needs-publish=false" >> "$GITHUB_OUTPUT"
           fi
 
-  build:
+  publish-platform:
     needs: [check, needs-publish]
     if: needs.needs-publish.outputs.needs-publish == 'true'
     strategy:
@@ -70,19 +70,27 @@ jobs:
     runs-on: ${{ matrix.runs-on }}
     permissions:
       contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
-      - name: Dagger build
+      - name: Dagger publish platform
         uses: memospot/action-dagger@v1
         with:
           version: "latest"
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
+          cache-key: wasmcloud-host-${{ matrix.platform }}-${{ github.run_id }}
           args: >-
-            build
+            publish-platform
             --platform=${{ matrix.platform }}
+            --registry=ghcr.io
+            --image=seamlezz/wasmcloud-host
+            --username=${{ github.actor }}
+            --password=env:GITHUB_TOKEN
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  publish:
-    needs: [needs-publish, build]
+  manifest:
+    needs: [publish-platform]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -90,17 +98,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Dagger publish if needed
+      - id: version
         uses: memospot/action-dagger@v1
         with:
           version: "latest"
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
-          args: >-
-            publish
-            --registry=ghcr.io
-            --image=seamlezz/wasmcloud-host
-            --include-latest=true
-            --username=${{ github.actor }}
-            --password=env:GITHUB_TOKEN
+          dagger-flags: "-s"
+          args: runtime-version
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-arch manifest
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ghcr.io/seamlezz/wasmcloud-host
+          VERSION: ${{ steps.version.outputs.output }}
+        run: |
+          set -euo pipefail
+          VERSION="$(echo "$VERSION" | tr -d '[:space:]')"
+          docker buildx imagetools create \
+            -t "${IMAGE}:${VERSION}" \
+            -t "${IMAGE}:latest" \
+            "${IMAGE}:${VERSION}-amd64" \
+            "${IMAGE}:${VERSION}-arm64"

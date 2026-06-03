@@ -73,6 +73,42 @@ func (m *WasmcloudHost) RuntimeVersion(ctx context.Context) (string, error) {
 	return workspaceVersion(ctx, m.Source.File("Cargo.toml"))
 }
 
+func platformTagSuffix(platform dagger.Platform) (string, error) {
+	switch platform {
+	case "linux/amd64":
+		return "amd64", nil
+	case "linux/arm64":
+		return "arm64", nil
+	default:
+		return "", fmt.Errorf("unsupported publish platform %q", platform)
+	}
+}
+
+func (m *WasmcloudHost) PublishPlatform(
+	ctx context.Context,
+	registry string,
+	image string,
+	platform dagger.Platform,
+	username string,
+	password *dagger.Secret,
+) (string, error) {
+	version, err := m.RuntimeVersion(ctx)
+	if err != nil {
+		return "", err
+	}
+	suffix, err := platformTagSuffix(platform)
+	if err != nil {
+		return "", err
+	}
+	tag := fmt.Sprintf("%s-%s", version, suffix)
+
+	return m.runtimeImageForPlatform(platform).
+		WithLabel("org.opencontainers.image.version", version).
+		WithLabel("org.opencontainers.image.source", "https://github.com/Seamlezz/wasmCloud-host").
+		WithRegistryAuth(registry, username, password).
+		Publish(ctx, fmt.Sprintf("%s/%s:%s", registry, image, tag))
+}
+
 func (m *WasmcloudHost) Publish(
 	ctx context.Context,
 	registry string,

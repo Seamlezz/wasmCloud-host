@@ -59,9 +59,9 @@ WASI P3 and OpenTelemetry stay on unless disabled with `--wasip3=false` / `--was
 
 ## Container image
 
-Published to **`ghcr.io/seamlezz/wasmcloud-host`** (`linux/amd64`, `linux/arm64`). Tags: workspace version from `Cargo.toml` and `latest`.
+Published to **`ghcr.io/seamlezz/wasmcloud-host`** (`linux/amd64`, `linux/arm64`). Tags: workspace version from `Cargo.toml` and `latest`. Per-platform images are also tagged as `<version>-amd64` and `<version>-arm64`.
 
-CI (`.github/workflows/publish-runtime.yml`) publishes on push to `main` when the version tag does not already exist in GHCR. **workflow_dispatch** forces a republish with `--force=true`.
+CI (`.github/workflows/publish-runtime.yml`) builds and publishes each platform natively, then combines them into the version and `latest` multi-arch manifests. Publishing runs on push to `main` when the version tag does not already exist in GHCR. **workflow_dispatch** forces a republish.
 
 ### Local development
 
@@ -71,18 +71,28 @@ Read the current runtime version:
 dagger call runtime-version
 ```
 
-Dry-run: check whether CI would publish (no push, requires `packages: read` token):
+Check whether CI would publish (requires `packages: read` token):
 
 ```bash
-dagger call publish-if-needed \
-  --dry-run=true \
+dagger call needs-publish \
   --registry=ghcr.io \
   --image=seamlezz/wasmcloud-host \
   --username=YOUR_GH_USER \
   --password=env://GITHUB_TOKEN
 ```
 
-Publish a specific tag manually:
+Publish one platform (same as a CI matrix leg):
+
+```bash
+dagger call publish-platform \
+  --platform=linux/amd64 \
+  --registry=ghcr.io \
+  --image=seamlezz/wasmcloud-host \
+  --username=YOUR_GH_USER \
+  --password=env://GITHUB_TOKEN
+```
+
+Publish multi-arch locally (builds both platforms in one graph):
 
 ```bash
 dagger call publish \
@@ -92,17 +102,6 @@ dagger call publish \
   --username=YOUR_GH_USER \
   --password=env://GITHUB_TOKEN \
   --include-latest=true
-```
-
-Force republish the current version (skips registry existence check):
-
-```bash
-dagger call publish-if-needed \
-  --force=true \
-  --registry=ghcr.io \
-  --image=seamlezz/wasmcloud-host \
-  --username=YOUR_GH_USER \
-  --password=env://GITHUB_TOKEN
 ```
 
 Build a single-platform image and inspect it:

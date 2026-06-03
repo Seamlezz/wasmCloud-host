@@ -77,6 +77,7 @@ func (m *WasmcloudHost) Publish(
 	ctx context.Context,
 	registry string,
 	image string,
+	// +optional
 	tag string,
 	username string,
 	password *dagger.Secret,
@@ -84,6 +85,14 @@ func (m *WasmcloudHost) Publish(
 	// +default=true
 	includeLatest bool,
 ) (string, error) {
+	if tag == "" {
+		var err error
+		tag, err = m.RuntimeVersion(ctx)
+		if err != nil {
+			return "", err
+		}
+	}
+
 	variants := m.labeledVariants(tag)
 	auth := dag.Container().WithRegistryAuth(registry, username, password)
 

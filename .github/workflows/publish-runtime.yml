@@ -17,11 +17,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Dagger check needs publish
-        uses: dagger/dagger-for-github@v7
+        uses: memospot/action-dagger@v1
         with:
           version: "latest"
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
-          dagger-flags: "--cloud"
           args: >-
             check
 
@@ -35,11 +34,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: gate
-        uses: dagger/dagger-for-github@v7
+        uses: memospot/action-dagger@v1
         with:
           version: "latest"
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
-          dagger-flags: "--cloud -s"
+          dagger-flags: "-s"
           args: >-
             needs-publish
             --registry=ghcr.io
@@ -59,7 +58,7 @@ jobs:
           fi
 
   build:
-    needs: needs-publish
+    needs: [check, needs-publish]
     if: needs.needs-publish.outputs.needs-publish == 'true'
     strategy:
       matrix:
@@ -74,11 +73,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Dagger build
-        uses: dagger/dagger-for-github@v7
+        uses: memospot/action-dagger@v1
         with:
           version: "latest"
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
-          dagger-flags: "--cloud"
           args: >-
             build
             --platform=${{ matrix.platform }}
@@ -93,11 +91,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Dagger publish if needed
-        uses: dagger/dagger-for-github@v7
+        uses: memospot/action-dagger@v1
         with:
           version: "latest"
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
-          dagger-flags: "--cloud"
           args: >-
             publish
             --registry=ghcr.io

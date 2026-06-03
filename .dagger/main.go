@@ -29,19 +29,7 @@ func (m *WasmcloudHost) Check(ctx context.Context) (*dagger.Container, error) {
 	return m.withChecks(platform), nil
 }
 
-func (m *WasmcloudHost) Build(
-	// +optional
-	// +default="linux/amd64"
-	platform dagger.Platform,
-) *dagger.Container {
-	return m.runtimeImageForPlatform(platform)
-}
-
-func (m *WasmcloudHost) RuntimeVersion(ctx context.Context) (string, error) {
-	return workspaceVersion(ctx, m.Source.File("Cargo.toml"))
-}
-
-func (m *WasmcloudHost) PublishIfNeeded(
+func (m *WasmcloudHost) NeedsPublish(
 	ctx context.Context,
 	registry string,
 	image string,
@@ -49,40 +37,40 @@ func (m *WasmcloudHost) PublishIfNeeded(
 	password *dagger.Secret,
 	// +optional
 	force bool,
-	// +optional
-	dryRun bool,
-	// +optional
-	// +default=true
-	includeLatest bool,
-) (string, error) {
+) (bool, error) {
+	if force {
+		return true, nil
+	}
+
 	version, err := m.RuntimeVersion(ctx)
 	if err != nil {
-		return "", err
+		return false, err
 	}
 
-	if !force {
-		exists, err := imageTagExists(ctx, registry, image, version, username, password)
-		if err != nil {
-			return "", err
-		}
-		if exists {
-			return fmt.Sprintf("skipped: %s/%s:%s already exists", registry, image, version), nil
-		}
-	}
-
-	if dryRun {
-		return fmt.Sprintf("dry-run: would publish %s/%s:%s", registry, image, version), nil
-	}
-
-	check, err := m.Check(ctx)
+	exists, err := imageTagExists(ctx, registry, image, version, username, password)
 	if err != nil {
-		return "", err
+		return false, err
 	}
-	if _, err := check.Sync(ctx); err != nil {
-		return "", err
-	}
+	return !exists, nil
+}
 
-	return m.Publish(ctx, registry, image, version, username, password, includeLatest)
+func (m *WasmcloudHost) Build(
+	ctx context.Context,
+	// +optional
+	platform dagger.Platform,
+) (*dagger.Container, error) {
+	if platform == "" {
+		var err error
+		platform, err = dag.DefaultPlatform(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return m.runtimeImageForPlatform(platform), nil
+}
+
+func (m *WasmcloudHost) RuntimeVersion(ctx context.Context) (string, error) {
+	return workspaceVersion(ctx, m.Source.File("Cargo.toml"))
 }
 
 func (m *WasmcloudHost) Publish(

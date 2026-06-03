@@ -10,7 +10,81 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dagger check needs publish
+        uses: dagger/dagger-for-github@v7
+        with:
+          version: "latest"
+          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
+          dagger-flags: "--cloud"
+          args: >-
+            check
+
+  needs-publish:
+    runs-on: ubuntu-latest
+    outputs:
+      needs-publish: ${{ steps.gate.outputs.needs-publish }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - id: gate
+        uses: dagger/dagger-for-github@v7
+        with:
+          version: "latest"
+          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
+          dagger-flags: "--cloud -s"
+          args: >-
+            needs-publish
+            --registry=ghcr.io
+            --image=seamlezz/wasmcloud-host
+            --username=${{ github.actor }}
+            --password=env:GITHUB_TOKEN
+            --force=${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - id: set-output
+        run: |
+          v="$(echo "${{ steps.gate.outputs.output }}" | tr -d '[:space:]')"
+          if [ "$v" = "true" ]; then
+            echo "needs-publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs-publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: needs-publish
+    if: needs.needs-publish.outputs.needs-publish == 'true'
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            runs-on: ubuntu-latest
+          - platform: linux/arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dagger build
+        uses: dagger/dagger-for-github@v7
+        with:
+          version: "latest"
+          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
+          dagger-flags: "--cloud"
+          args: >-
+            build
+            --platform=${{ matrix.platform }}
+
   publish:
+    needs: [needs-publish, build]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -21,16 +95,15 @@ jobs:
       - name: Dagger publish if needed
         uses: dagger/dagger-for-github@v7
         with:
-          version: "0.21.3"
-          verb: call
+          version: "latest"
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
+          dagger-flags: "--cloud"
           args: >-
-            publish-if-needed
+            publish
             --registry=ghcr.io
             --image=seamlezz/wasmcloud-host
             --include-latest=true
             --username=${{ github.actor }}
             --password=env:GITHUB_TOKEN
-            --force=${{ github.event_name == 'workflow_dispatch' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

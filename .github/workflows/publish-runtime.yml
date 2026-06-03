@@ -27,7 +27,7 @@ jobs:
   needs-publish:
     runs-on: ubuntu-latest
     outputs:
-      needs-publish: ${{ steps.gate.outputs.needs-publish }}
+      needs-publish: ${{ steps.set-output.outputs.needs-publish }}
     permissions:
       contents: read
       packages: read

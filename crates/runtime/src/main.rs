@@ -11,7 +11,7 @@ use wash_runtime::{
     },
     plugin::{
         wasi_blobstore::NatsBlobstore, wasi_config::DynamicConfig, wasi_keyvalue::NatsKeyValue,
-        wasi_logging::TracingLogger, wasmcloud_messaging::NatsMessaging,
+        wasi_logging::TracingLogger, wasi_otel::WasiOtel, wasmcloud_messaging::NatsMessaging,
     },
     washlet::{ClusterHostBuilder, NatsConnectionOptions, connect_nats, run_cluster_host},
 };
@@ -49,24 +49,23 @@ struct Args {
     #[arg(long = "http-addr", default_value = "0.0.0.0:8080", env = "HTTP_ADDR")]
     http_addr: SocketAddr,
 
-    #[arg(long = "allow-insecure-registries", default_value_t = false)]
+    #[arg(
+        long = "allow-insecure-registries",
+        default_value_t = false,
+        env = "ALLOW_INSECURE_REGISTRIES"
+    )]
     allow_insecure_registries: bool,
 
     #[arg(
         long = "registry-pull-timeout",
         value_parser = humantime::parse_duration,
-        default_value = "30s"
+        default_value = "30s",
+        env = "REGISTRY_PULL_TIMEOUT"
     )]
     registry_pull_timeout: Duration,
 
     #[arg(long = "oci-cache-dir", env = "OCI_CACHE_DIR")]
     oci_cache_dir: Option<PathBuf>,
-
-    #[arg(long = "wasip3", default_value_t = true, env = "WASIP3")]
-    wasip3: bool,
-
-    #[arg(long = "wasi-otel", default_value_t = true, env = "WASI_OTEL")]
-    wasi_otel: bool,
 }
 
 #[tokio::main]
@@ -99,7 +98,7 @@ async fn main() -> anyhow::Result<()> {
 
     let engine = Engine::builder()
         .with_pooling_allocator(true)
-        .with_wasip3(args.wasip3)
+        .with_wasip3(true)
         .build()
         .context("failed to build engine")?;
 
@@ -112,8 +111,11 @@ async fn main() -> anyhow::Result<()> {
         .with_host_config(host_config)
         .with_nats_client(Arc::new(scheduler_nats))
         .with_host_group(args.host_group.clone())
-        .with_plugin(Arc::new(DynamicConfig::new(true)))?
+        .with_plugin(Arc::new(
+            DynamicConfig::builder().copy_environment(true).build(),
+        ))?
         .with_plugin(Arc::new(TracingLogger::default()))?
+        .with_plugin(Arc::new(WasiOtel::default()))?
         .with_plugin(Arc::new(NatsBlobstore::new(&data_nats)))?
         .with_plugin(Arc::new(NatsMessaging::new(data_nats.clone())))?
         .with_plugin(Arc::new(NatsKeyValue::new(&data_nats)))?
@@ -125,11 +127,6 @@ async fn main() -> anyhow::Result<()> {
     }
     if let Some(environment) = args.environment {
         builder = builder.with_environment(environment);
-    }
-    if args.wasi_otel {
-        builder = builder.with_plugin(Arc::new(
-            wash_runtime::plugin::wasi_otel::WasiOtel::default(),
-        ))?;
     }
 
     let cluster_host = builder.build().context("failed to build cluster host")?;

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/pelletier/go-toml/v2"
+	"github.com/BurntSushi/toml"
 
 	"dagger/wasmcloud-host/internal/dagger"
 )
@@ -24,7 +24,7 @@ func workspaceVersion(ctx context.Context, cargo *dagger.File) (string, error) {
 		return "", fmt.Errorf("read Cargo.toml: %w", err)
 	}
 	var doc cargoWorkspace
-	if err := toml.Unmarshal([]byte(raw), &doc); err != nil {
+	if _, err := toml.Decode(raw, &doc); err != nil {
 		return "", fmt.Errorf("parse Cargo.toml: %w", err)
 	}
 	v := doc.Workspace.Package.Version

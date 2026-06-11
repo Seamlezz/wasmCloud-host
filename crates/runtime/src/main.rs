@@ -13,7 +13,7 @@ use wash_runtime::{
         wasi_blobstore::NatsBlobstore, wasi_config::DynamicConfig, wasi_keyvalue::NatsKeyValue,
         wasi_logging::TracingLogger, wasi_otel::WasiOtel, wasmcloud_messaging::NatsMessaging,
     },
-    washlet::{ClusterHostBuilder, NatsConnectionOptions, connect_nats, run_cluster_host},
+    washlet::{ClusterHostBuilder, NatsConnectionOptions, run_cluster_host},
 };
 use wasmcloud_plugin_surrealdb::WasmcloudSurrealdb;
 
@@ -66,6 +66,62 @@ struct Args {
 
     #[arg(long = "oci-cache-dir", env = "OCI_CACHE_DIR")]
     oci_cache_dir: Option<PathBuf>,
+
+    #[arg(long = "nats-creds", env = "NATS_CREDENTIALS")]
+    nats_creds: Option<PathBuf>,
+
+    #[arg(long = "nats-ca", env = "NATS_CA")]
+    nats_ca: Option<PathBuf>,
+
+    #[arg(
+        long = "nats-tls-first",
+        default_value_t = false,
+        env = "NATS_TLS_FIRST"
+    )]
+    nats_tls_first: bool,
+}
+
+async fn build_nats_options(args: &Args) -> anyhow::Result<NatsConnectionOptions> {
+    Ok(NatsConnectionOptions {
+        tls_ca: args.nats_ca.clone(),
+        tls_first: args.nats_tls_first,
+        ..Default::default()
+    })
+}
+
+async fn connect_nats_with_creds(
+    url: String,
+    options: NatsConnectionOptions,
+    creds: Option<PathBuf>,
+) -> anyhow::Result<async_nats::Client> {
+    let mut opts = async_nats::ConnectOptions::new();
+
+    if let Some(timeout) = options.request_timeout {
+        opts = opts.request_timeout(Some(timeout));
+    }
+
+    if let Some(ca_path) = options.tls_ca {
+        opts = opts.add_root_certificates(ca_path);
+    }
+
+    if options.tls_first {
+        opts = opts.tls_first();
+    }
+
+    if let (Some(cert_path), Some(key_path)) = (options.tls_cert, options.tls_key) {
+        opts = opts.add_client_certificate(cert_path, key_path);
+    }
+
+    if let Some(creds_path) = creds {
+        opts = opts
+            .credentials_file(creds_path)
+            .await
+            .context("failed to load NATS credentials file")?;
+    }
+
+    opts.connect(url)
+        .await
+        .context("failed to connect to NATS")
 }
 
 #[tokio::main]
@@ -78,16 +134,23 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
 
-    let scheduler_nats = connect_nats(
+    let nats_options = build_nats_options(&args).await?;
+
+    let scheduler_nats = connect_nats_with_creds(
         args.scheduler_nats_url.clone(),
-        NatsConnectionOptions::default(),
+        nats_options.clone(),
+        args.nats_creds.clone(),
     )
     .await
     .context("failed to connect to scheduler NATS")?;
 
-    let data_nats = connect_nats(args.data_nats_url.clone(), NatsConnectionOptions::default())
-        .await
-        .context("failed to connect to data NATS")?;
+    let data_nats = connect_nats_with_creds(
+        args.data_nats_url.clone(),
+        nats_options,
+        args.nats_creds.clone(),
+    )
+    .await
+    .context("failed to connect to data NATS")?;
     let data_nats = Arc::new(data_nats);
 
     let host_config = HostConfig {

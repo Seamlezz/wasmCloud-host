@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/plugins/surrealdb/", "crates/runtime/"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.91.0"
 repository = "https://github.com/Seamlezz/wasmCloud-host"
@@ -12,9 +12,9 @@ license = "Unlicense"
 [workspace.dependencies]
 anyhow = { version = "1", default-features = false }
 async-nats = {
-  version = "0.49",
+  version = "0.47",
   default-features = false,
-  features = ["aws-lc-rs", "jetstream", "kv", "object-store", "service"]
+  features = ["aws-lc-rs", "jetstream", "kv", "nkeys", "object-store", "service"]
 }
 async-trait = { version = "0.1", default-features = false }
 clap = { version = "4", features = ["derive", "env"] }

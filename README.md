@@ -21,13 +21,13 @@ Guest components: [`surrealdb-component-sdk`](https://github.com/Seamlezz/surrea
 
 ```bash
 cargo build --release -p wasmcloud-host-runtime
-./target/release/wasmcloud-host \
+./target/release/wasmcloud-host host \
   --scheduler-nats-url=nats://127.0.0.1:4222 \
   --data-nats-url=nats://127.0.0.1:4222 \
   --host-group=default
 ```
 
-Same settings via env: `SCHEDULER_NATS_URL`, `DATA_NATS_URL`, `HOST_GROUP`. Full flags: `wasmcloud-host --help`.
+Same settings via env: `SCHEDULER_NATS_URL`, `DATA_NATS_URL`, `HOST_GROUP`. Full flags: `wasmcloud-host host --help`.
 
 ## SurrealDB on workloads
 
@@ -43,6 +43,8 @@ Add a `hostInterfaces` entry for `seamlezz:surrealdb/call@0.2.0` with:
 
 ## Configuration
 
+All host flags require the `host` subcommand: `wasmcloud-host host [flags]`. Global flags (`--log-level`, `--verbose`, `--otel-debug`) go before the subcommand.
+
 | Flag | Env | Default |
 |------|-----|---------|
 | `--host-group` | `HOST_GROUP` | `default` |
@@ -51,14 +53,33 @@ Add a `hostInterfaces` entry for `seamlezz:surrealdb/call@0.2.0` with:
 | `--http-addr` | `HTTP_ADDR` | `0.0.0.0:8080` |
 | `--host-name` | `HOST_NAME` | — |
 | `--environment` | `WASMCLOUD_HOST_ENVIRONMENT` | — |
-| `--log-level` | — | `info` |
+| `--log-level` / `-l` | — | `info` |
 | `--verbose` / `-v` | — | `false` |
 | `--otel-debug` | `WASMCLOUD_OTEL_DEBUG` | `false` |
 | `--oci-cache-dir` | `OCI_CACHE_DIR` | — |
-| `--wasip3` | `WASIP3` | `true` |
-| `--wasi-otel` | `WASI_OTEL` | `true` |
+| `--allow-insecure-registries` | `ALLOW_INSECURE_REGISTRIES` | `false` |
+| `--registry-pull-timeout` | `REGISTRY_PULL_TIMEOUT` | `30s` |
 
-WASI P3 and OpenTelemetry stay on unless disabled with `--wasip3=false` / `--wasi-otel=false`.
+### NATS TLS (per-connection)
+
+| Flag | Env |
+|------|-----|
+| `--scheduler-nats-tls-ca` | `SCHEDULER_NATS_TLS_CA` |
+| `--scheduler-nats-tls-cert` | `SCHEDULER_NATS_TLS_CERT` |
+| `--scheduler-nats-tls-key` | `SCHEDULER_NATS_TLS_KEY` |
+| `--data-nats-tls-ca` | `DATA_NATS_TLS_CA` |
+| `--data-nats-tls-cert` | `DATA_NATS_TLS_CERT` |
+| `--data-nats-tls-key` | `DATA_NATS_TLS_KEY` |
+| `--nats-creds` | `NATS_CREDENTIALS` |
+
+### HTTP TLS
+
+| Flag | Env |
+|------|-----|
+| `--tls-cert-path` | `TLS_CERT_PATH` |
+| `--tls-key-path` | `TLS_KEY_PATH` |
+
+When both are set, the HTTP server serves HTTPS instead of plain HTTP.
 
 ## Observability
 
@@ -75,7 +96,7 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 export OTEL_SERVICE_NAME=wasmcloud-host
 export RUST_LOG=info,wasmcloud_plugin_surrealdb=debug
 
-./target/release/wasmcloud-host --host-group=dev
+./target/release/wasmcloud-host host --host-group=dev
 ```
 
 Open http://localhost:16686 to inspect traces. Guest workload telemetry (via `wasi:otel`) exports separately with `service.name=wasi-otel`.
@@ -160,7 +181,7 @@ dagger call publish \
 Build a single-platform image and inspect it:
 
 ```bash
-dagger call build --platform=linux/amd64 with-exec --args=/usr/local/bin/wasmcloud-host stdout
+dagger call build --platform=linux/amd64 with-exec --args=/usr/local/bin/wasmcloud-host,host,--help stdout
 ```
 
 ## Development

@@ -1,13 +1,13 @@
 use std::{io::IsTerminal, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::Context as _;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use tracing::{Level, info};
 use wash_runtime::{
     engine::Engine,
     host::{
         HostConfig,
-        http::{DynamicRouter, HttpServer},
+        http::{DynamicRouter, HttpServer, TlsConfig},
     },
     observability::{self, Meters},
     plugin::{
@@ -23,20 +23,33 @@ use wasmcloud_plugin_surrealdb::WasmcloudSurrealdb;
     name = "wasmcloud-host",
     about = "wasmCloud cluster host with SurrealDB plugin"
 )]
-struct Args {
-    #[arg(short = 'l', long = "log-level", default_value_t = Level::INFO)]
+struct Cli {
+    #[arg(short = 'l', long = "log-level", default_value_t = Level::INFO, global = true)]
     log_level: Level,
 
-    #[arg(long, short = 'v', default_value_t = false)]
+    #[arg(long, short = 'v', default_value_t = false, global = true)]
     verbose: bool,
 
     #[arg(
         long = "otel-debug",
         default_value_t = false,
-        env = "WASMCLOUD_OTEL_DEBUG"
+        env = "WASMCLOUD_OTEL_DEBUG",
+        global = true
     )]
     otel_debug: bool,
 
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Run the wasmCloud host
+    Host(HostArgs),
+}
+
+#[derive(Debug, clap::Args)]
+struct HostArgs {
     #[arg(long = "host-group", default_value = "default", env = "HOST_GROUP")]
     host_group: String,
 
@@ -84,23 +97,50 @@ struct Args {
     #[arg(long = "nats-creds", env = "NATS_CREDENTIALS")]
     nats_creds: Option<PathBuf>,
 
-    #[arg(long = "nats-ca", env = "NATS_CA")]
-    nats_ca: Option<PathBuf>,
+    // Per-connection scheduler NATS TLS args
+    #[arg(long = "scheduler-nats-tls-ca", env = "SCHEDULER_NATS_TLS_CA")]
+    scheduler_nats_tls_ca: Option<PathBuf>,
 
-    #[arg(
-        long = "nats-tls-first",
-        default_value_t = false,
-        env = "NATS_TLS_FIRST"
-    )]
-    nats_tls_first: bool,
+    #[arg(long = "scheduler-nats-tls-cert", env = "SCHEDULER_NATS_TLS_CERT")]
+    scheduler_nats_tls_cert: Option<PathBuf>,
+
+    #[arg(long = "scheduler-nats-tls-key", env = "SCHEDULER_NATS_TLS_KEY")]
+    scheduler_nats_tls_key: Option<PathBuf>,
+
+    // Per-connection data NATS TLS args
+    #[arg(long = "data-nats-tls-ca", env = "DATA_NATS_TLS_CA")]
+    data_nats_tls_ca: Option<PathBuf>,
+
+    #[arg(long = "data-nats-tls-cert", env = "DATA_NATS_TLS_CERT")]
+    data_nats_tls_cert: Option<PathBuf>,
+
+    #[arg(long = "data-nats-tls-key", env = "DATA_NATS_TLS_KEY")]
+    data_nats_tls_key: Option<PathBuf>,
+
+    // HTTP TLS args
+    #[arg(long = "tls-cert-path", env = "TLS_CERT_PATH")]
+    tls_cert_path: Option<PathBuf>,
+
+    #[arg(long = "tls-key-path", env = "TLS_KEY_PATH")]
+    tls_key_path: Option<PathBuf>,
 }
 
-async fn build_nats_options(args: &Args) -> anyhow::Result<NatsConnectionOptions> {
-    Ok(NatsConnectionOptions {
-        tls_ca: args.nats_ca.clone(),
-        tls_first: args.nats_tls_first,
+fn build_scheduler_nats_options(args: &HostArgs) -> NatsConnectionOptions {
+    NatsConnectionOptions {
+        tls_ca: args.scheduler_nats_tls_ca.clone(),
+        tls_cert: args.scheduler_nats_tls_cert.clone(),
+        tls_key: args.scheduler_nats_tls_key.clone(),
         ..Default::default()
-    })
+    }
+}
+
+fn build_data_nats_options(args: &HostArgs) -> NatsConnectionOptions {
+    NatsConnectionOptions {
+        tls_ca: args.data_nats_tls_ca.clone(),
+        tls_cert: args.data_nats_tls_cert.clone(),
+        tls_key: args.data_nats_tls_key.clone(),
+        ..Default::default()
+    }
 }
 
 async fn connect_nats_with_creds(
@@ -140,14 +180,15 @@ async fn connect_nats_with_creds(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
+    let cli = Cli::parse();
+    let Command::Host(args) = cli.command;
 
-    let observability_log_level = if args.otel_debug {
+    let observability_log_level = if cli.otel_debug {
         Level::DEBUG
     } else {
-        args.log_level
+        cli.log_level
     };
-    let observability_verbose = args.verbose || args.otel_debug;
+    let observability_verbose = cli.verbose || cli.otel_debug;
 
     let otel_shutdown = observability::initialize_observability(
         observability_log_level,
@@ -157,11 +198,12 @@ async fn main() -> anyhow::Result<()> {
 
     wash_runtime::init_crypto();
 
-    let nats_options = build_nats_options(&args).await?;
+    let scheduler_nats_options = build_scheduler_nats_options(&args);
+    let data_nats_options = build_data_nats_options(&args);
 
     let scheduler_nats = connect_nats_with_creds(
         args.scheduler_nats_url.clone(),
-        nats_options.clone(),
+        scheduler_nats_options,
         args.nats_creds.clone(),
     )
     .await
@@ -169,7 +211,7 @@ async fn main() -> anyhow::Result<()> {
 
     let data_nats = connect_nats_with_creds(
         args.data_nats_url.clone(),
-        nats_options,
+        data_nats_options,
         args.nats_creds.clone(),
     )
     .await
@@ -188,9 +230,17 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .context("failed to build engine")?;
 
-    let http = HttpServer::new(DynamicRouter::default(), args.http_addr)
-        .await
-        .context("failed to start HTTP server")?;
+    let http = match (&args.tls_cert_path, &args.tls_key_path) {
+        (Some(cert_path), Some(key_path)) => {
+            let tls_config = TlsConfig::new(cert_path, key_path);
+            HttpServer::new_with_tls(DynamicRouter::default(), args.http_addr, tls_config)
+                .await
+                .context("failed to start HTTPS server")?
+        }
+        _ => HttpServer::new(DynamicRouter::default(), args.http_addr)
+            .await
+            .context("failed to start HTTP server")?,
+    };
 
     let otel_enabled = std::env::vars().any(|(key, _)| key.starts_with("OTEL_"));
 

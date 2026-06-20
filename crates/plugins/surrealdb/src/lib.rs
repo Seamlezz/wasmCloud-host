@@ -12,7 +12,7 @@ use tokio::sync::RwLock;
 use tracing::instrument;
 use wash_runtime::engine::ctx::{SharedCtx, extract_active_ctx};
 use wash_runtime::engine::workload::WorkloadItem;
-use wash_runtime::plugin::{HostPlugin, WorkloadTracker};
+use wash_runtime::plugin::{HostPlugin, WitInterfaces, WorkloadTracker};
 use wash_runtime::wit::{WitInterface, WitWorld};
 
 pub use config::ConnectionKey;
@@ -134,15 +134,13 @@ impl HostPlugin for WasmcloudSurrealdb {
         }
     }
 
-    #[instrument(skip_all, fields(component_id = %item.id()))]
+    #[instrument(skip_all, fields(workload_id = item.workload_id(), component_id = item.id()))]
     async fn on_workload_item_bind<'a>(
         &self,
         item: &mut WorkloadItem<'a>,
-        interfaces: HashSet<WitInterface>,
+        interfaces: WitInterfaces<'_>,
     ) -> anyhow::Result<()> {
-        let Some(iface) = interfaces
-            .iter()
-            .find(|i| i.namespace == "seamlezz" && i.package == "surrealdb")
+        let Some(iface) = interfaces.get("seamlezz", "surrealdb", &[])
         else {
             return Ok(());
         };
@@ -175,7 +173,7 @@ impl HostPlugin for WasmcloudSurrealdb {
     async fn on_workload_unbind(
         &self,
         workload_id: &str,
-        _interfaces: HashSet<WitInterface>,
+        _interfaces: WitInterfaces<'_>,
     ) -> anyhow::Result<()> {
         let manager = Arc::clone(&self.subscription_manager);
 
@@ -210,7 +208,7 @@ impl HostPlugin for WasmcloudSurrealdb {
 mod lifecycle_tests {
     use super::*;
     use std::collections::HashSet;
-    use wash_runtime::plugin::{HostPlugin, WorkloadTrackerItem};
+    use wash_runtime::plugin::{HostPlugin, WitInterfaces, WorkloadTrackerItem};
 
     fn memory_connection_key() -> ConnectionKey {
         ConnectionKey::from_config(&std::collections::HashMap::from([
@@ -247,8 +245,9 @@ mod lifecycle_tests {
                 .insert(component_id.to_string(), workload_id.to_string());
         }
 
+        let empty_interfaces = HashSet::new();
         plugin
-            .on_workload_unbind(workload_id, HashSet::new())
+            .on_workload_unbind(workload_id, WitInterfaces::new(&empty_interfaces))
             .await
             .expect("unbind should succeed");
 

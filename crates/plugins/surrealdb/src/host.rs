@@ -67,8 +67,8 @@ fn plugin_and_component_id(
     ctx: &ActiveCtx<'_>,
 ) -> anyhow::Result<(Arc<WasmcloudSurrealdb>, String)> {
     let plugin = ctx
-        .get_plugin::<WasmcloudSurrealdb>(PLUGIN_SURREALDB_ID)
-        .ok_or_else(|| anyhow::anyhow!("surrealdb plugin not registered"))?;
+        .try_get_plugin::<WasmcloudSurrealdb>(PLUGIN_SURREALDB_ID)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok((plugin, ctx.component_id.to_string()))
 }
 

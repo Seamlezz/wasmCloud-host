@@ -61,6 +61,7 @@ func (m *WasmcloudHost) runtimeImageForPlatform(platform dagger.Platform) *dagge
 			Permissions: perms,
 		}).
 		WithEnvVariable("RUST_LOG", "info").
+		WithEnvVariable("OTEL_SERVICE_NAME", "wasmcloud-host").
 		WithEntrypoint([]string{installPath})
 }
 

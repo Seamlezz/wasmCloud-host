@@ -154,6 +154,11 @@ impl HostPlugin for WasmcloudSurrealdb {
         let key = ConnectionKey::from_config(&iface.config)?;
         self.get_or_create_connection(&key).await?;
 
+        let span = tracing::Span::current();
+        span.record("surrealdb.url", key.url_for_logging().as_str());
+        span.record("surrealdb.namespace", key.namespace.as_str());
+        span.record("surrealdb.database", key.database.as_str());
+
         self.tracker
             .write()
             .await

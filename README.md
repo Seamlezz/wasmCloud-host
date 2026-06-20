@@ -51,11 +51,64 @@ Add a `hostInterfaces` entry for `seamlezz:surrealdb/call@0.2.0` with:
 | `--http-addr` | `HTTP_ADDR` | `0.0.0.0:8080` |
 | `--host-name` | `HOST_NAME` | — |
 | `--environment` | `WASMCLOUD_HOST_ENVIRONMENT` | — |
+| `--log-level` | — | `info` |
+| `--verbose` / `-v` | — | `false` |
+| `--otel-debug` | `WASMCLOUD_OTEL_DEBUG` | `false` |
 | `--oci-cache-dir` | `OCI_CACHE_DIR` | — |
 | `--wasip3` | `WASIP3` | `true` |
 | `--wasi-otel` | `WASI_OTEL` | `true` |
 
 WASI P3 and OpenTelemetry stay on unless disabled with `--wasip3=false` / `--wasi-otel=false`.
+
+## Observability
+
+The host exports traces, logs, and metrics via OTLP (gRPC) when any `OTEL_*` environment variable is set. Without `OTEL_*`, logs go to stderr only (`RUST_LOG` filters apply).
+
+### Local Jaeger
+
+```bash
+docker run -d --name jaeger \
+  -p 4317:4317 -p 16686:16686 \
+  jaegertracing/all-in-one:latest
+
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+export OTEL_SERVICE_NAME=wasmcloud-host
+export RUST_LOG=info,wasmcloud_plugin_surrealdb=debug
+
+./target/release/wasmcloud-host --host-group=dev
+```
+
+Open http://localhost:16686 to inspect traces. Guest workload telemetry (via `wasi:otel`) exports separately with `service.name=wasi-otel`.
+
+### Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP gRPC collector endpoint (traces, logs, metrics) |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | Traces-only endpoint override |
+| `OTEL_SERVICE_NAME` | Host `service.name` resource attribute |
+| `OTEL_RESOURCE_ATTRIBUTES` | Extra resource attributes (comma-separated `key=value`) |
+| `OTEL_TRACES_SAMPLER` | Trace sampling policy |
+| `WASMCLOUD_OTEL_DEBUG` | Sets host observability logging to debug and enables verbose runtime targets |
+| `RUST_LOG` | Log filter (overrides `--log-level` when set) |
+
+Map host identity into resource attributes:
+
+| Host flag / env | Suggested OTEL attribute |
+|-----------------|--------------------------|
+| `--host-group` / `HOST_GROUP` | `wasmcloud.host.group` |
+| `--host-name` / `HOST_NAME` | `wasmcloud.host.name` |
+| `--environment` / `WASMCLOUD_HOST_ENVIRONMENT` | `deployment.environment` |
+
+Example:
+
+```bash
+export OTEL_RESOURCE_ATTRIBUTES="wasmcloud.host.group=prod,wasmcloud.host.name=host-1,deployment.environment=prod"
+```
+
+SurrealDB host calls emit spans with `db.system=surrealdb` and `db.operation` (`query`, `subscribe`, `cancel`). Query text and param values are not logged.
+
+See [docs/observability.md](docs/observability.md) for the full design.
 
 ## Container image
 

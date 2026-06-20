@@ -1,14 +1,15 @@
-use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{io::IsTerminal, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::Context as _;
 use clap::Parser;
-use tracing::info;
+use tracing::{Level, info};
 use wash_runtime::{
     engine::Engine,
     host::{
         HostConfig,
         http::{DynamicRouter, HttpServer},
     },
+    observability::{self, Meters},
     plugin::{
         wasi_blobstore::NatsBlobstore, wasi_config::DynamicConfig, wasi_keyvalue::NatsKeyValue,
         wasi_logging::TracingLogger, wasi_otel::WasiOtel, wasmcloud_messaging::NatsMessaging,
@@ -23,6 +24,19 @@ use wasmcloud_plugin_surrealdb::WasmcloudSurrealdb;
     about = "wasmCloud cluster host with SurrealDB plugin"
 )]
 struct Args {
+    #[arg(short = 'l', long = "log-level", default_value_t = Level::INFO)]
+    log_level: Level,
+
+    #[arg(long, short = 'v', default_value_t = false)]
+    verbose: bool,
+
+    #[arg(
+        long = "otel-debug",
+        default_value_t = false,
+        env = "WASMCLOUD_OTEL_DEBUG"
+    )]
+    otel_debug: bool,
+
     #[arg(long = "host-group", default_value = "default", env = "HOST_GROUP")]
     host_group: String,
 
@@ -126,13 +140,22 @@ async fn connect_nats_with_creds(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    let args = Args::parse();
+
+    let observability_log_level = if args.otel_debug {
+        Level::DEBUG
+    } else {
+        args.log_level
+    };
+    let observability_verbose = args.verbose || args.otel_debug;
+
+    let otel_shutdown = observability::initialize_observability(
+        observability_log_level,
+        std::io::stderr().is_terminal(),
+        observability_verbose,
+    )?;
 
     wash_runtime::init_crypto();
-
-    let args = Args::parse();
 
     let nats_options = build_nats_options(&args).await?;
 
@@ -169,11 +192,14 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("failed to start HTTP server")?;
 
+    let otel_enabled = std::env::vars().any(|(key, _)| key.starts_with("OTEL_"));
+
     let mut builder = ClusterHostBuilder::default()
         .with_engine(engine)
         .with_host_config(host_config)
         .with_nats_client(Arc::new(scheduler_nats))
         .with_host_group(args.host_group.clone())
+        .with_meters(Meters::new(otel_enabled))
         .with_plugin(Arc::new(
             DynamicConfig::builder().copy_environment(true).build(),
         ))?
@@ -225,5 +251,6 @@ async fn main() -> anyhow::Result<()> {
     info!("Stopping host...");
     shutdown.await?;
     info!("Host stopped");
+    otel_shutdown();
     Ok(())
 }

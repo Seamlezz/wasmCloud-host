@@ -6510,7 +6510,7 @@ dependencies = [
 
 [[package]]
 name = "wasmcloud-host-runtime"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -6519,14 +6519,13 @@ dependencies = [
  "humantime",
  "tokio",
  "tracing",
- "tracing-subscriber",
  "wash-runtime",
  "wasmcloud-plugin-surrealdb",
 ]
 
 [[package]]
 name = "wasmcloud-plugin-surrealdb"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "async-trait",

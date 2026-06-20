@@ -15,6 +15,10 @@ pub struct ConnectionKey {
 }
 
 impl ConnectionKey {
+    pub fn url_for_logging(&self) -> String {
+        redact_url_credentials(&self.url)
+    }
+
     pub fn from_config(config: &HashMap<String, String>) -> anyhow::Result<Self> {
         let url = config
             .get("url")
@@ -74,6 +78,24 @@ pub async fn connect(key: &ConnectionKey) -> anyhow::Result<Surreal<Any>> {
     }
 
     Ok(db)
+}
+
+fn redact_url_credentials(url: &str) -> String {
+    let Some(scheme_end) = url.find("://") else {
+        return url.to_string();
+    };
+
+    let (scheme, rest) = url.split_at(scheme_end + 3);
+    let Some(at_pos) = rest.rfind('@') else {
+        return url.to_string();
+    };
+
+    let auth = &rest[..at_pos];
+    if auth.is_empty() || !auth.contains(':') {
+        return url.to_string();
+    }
+
+    format!("{scheme}{}", &rest[at_pos + 1..])
 }
 
 #[cfg(test)]
@@ -188,5 +210,29 @@ mod tests {
         ]);
         let key = ConnectionKey::from_config(&cfg).unwrap();
         assert!(key.password.is_none());
+    }
+
+    #[test]
+    fn url_for_logging_redacts_credentials() {
+        let key = ConnectionKey {
+            url: "ws://admin:secret@127.0.0.1:8000".to_string(),
+            namespace: "ns".to_string(),
+            database: "db".to_string(),
+            username: None,
+            password: None,
+        };
+        assert_eq!(key.url_for_logging(), "ws://127.0.0.1:8000");
+    }
+
+    #[test]
+    fn url_for_logging_preserves_url_without_credentials() {
+        let key = ConnectionKey {
+            url: "memory".to_string(),
+            namespace: "ns".to_string(),
+            database: "db".to_string(),
+            username: None,
+            password: None,
+        };
+        assert_eq!(key.url_for_logging(), "memory");
     }
 }

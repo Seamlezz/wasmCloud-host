@@ -19,6 +19,5 @@ async-trait = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 clap = { workspace = true }
 humantime = { workspace = true }

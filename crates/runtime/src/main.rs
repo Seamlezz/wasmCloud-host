@@ -224,9 +224,12 @@ async fn main() -> anyhow::Result<()> {
         oci_cache_dir: args.oci_cache_dir,
     };
 
+    let otel_enabled = std::env::vars().any(|(key, _)| key.starts_with("OTEL_"));
+
     let engine = Engine::builder()
         .with_pooling_allocator(true)
         .with_wasip3(true)
+        .with_fuel_consumption(otel_enabled)
         .build()
         .context("failed to build engine")?;
 
@@ -241,8 +244,6 @@ async fn main() -> anyhow::Result<()> {
             .await
             .context("failed to start HTTP server")?,
     };
-
-    let otel_enabled = std::env::vars().any(|(key, _)| key.starts_with("OTEL_"));
 
     let mut builder = ClusterHostBuilder::default()
         .with_engine(engine)

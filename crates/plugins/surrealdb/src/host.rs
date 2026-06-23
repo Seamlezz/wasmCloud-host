@@ -259,8 +259,8 @@ async fn execute_cancel(
     result
 }
 
-impl bindings::seamlezz::surrealdb::call::HostWithStore for SharedCtx {
-    async fn query<T: Send>(
+impl<T: Send + 'static> bindings::seamlezz::surrealdb::call::HostWithStore<T> for SharedCtx {
+    async fn query(
         accessor: &Accessor<T, Self>,
         query: String,
         params: Vec<(String, Vec<u8>)>,
@@ -272,7 +272,7 @@ impl bindings::seamlezz::surrealdb::call::HostWithStore for SharedCtx {
         execute_query(plugin, component_id, query, params).await
     }
 
-    async fn subscribe<T: Send>(
+    async fn subscribe(
         accessor: &Accessor<T, Self>,
         query: String,
         params: Vec<(String, Vec<u8>)>,
@@ -290,7 +290,7 @@ impl bindings::seamlezz::surrealdb::call::HostWithStore for SharedCtx {
         Ok((subscription_id, reader))
     }
 
-    async fn cancel<T: Send>(
+    async fn cancel(
         accessor: &Accessor<T, Self>,
         subscription_id: u64,
     ) -> wasmtime::Result<Result<(), String>> {

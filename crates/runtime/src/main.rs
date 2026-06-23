@@ -228,7 +228,6 @@ async fn main() -> anyhow::Result<()> {
 
     let engine = Engine::builder()
         .with_pooling_allocator(true)
-        .with_wasip3(true)
         .with_fuel_consumption(otel_enabled)
         .build()
         .context("failed to build engine")?;

@@ -8,8 +8,8 @@ use tokio::sync::{RwLock, mpsc, oneshot};
 use tracing::Span;
 use wasmtime::component::{Accessor, StreamReader};
 
-use wash_runtime::engine::ctx::{ActiveCtx, SharedCtx};
 use surrealdb_host_adapter::{QueryError, SubscribeError, SubscriptionTask};
+use wash_runtime::engine::ctx::{ActiveCtx, SharedCtx};
 
 use super::WasmcloudSurrealdb;
 use super::config::ConnectionKey;
@@ -26,10 +26,7 @@ fn record_span_error(slug: &'static str) {
 }
 
 fn record_duration(start: Instant) {
-    Span::current().record(
-        "surrealdb.duration_ms",
-        start.elapsed().as_millis() as u64,
-    );
+    Span::current().record("surrealdb.duration_ms", start.elapsed().as_millis() as u64);
 }
 
 fn record_connection_key(key: &ConnectionKey) {
@@ -269,8 +266,7 @@ impl bindings::seamlezz::surrealdb::call::HostWithStore for SharedCtx {
         params: Vec<(String, Vec<u8>)>,
     ) -> wasmtime::Result<Vec<Result<Vec<u8>, String>>> {
         let (plugin, component_id) = accessor.with(|mut view| {
-            plugin_and_component_id(&view.get())
-                .map_err(|e| wasmtime::Error::msg(e.to_string()))
+            plugin_and_component_id(&view.get()).map_err(|e| wasmtime::Error::msg(e.to_string()))
         })?;
 
         execute_query(plugin, component_id, query, params).await
@@ -282,8 +278,7 @@ impl bindings::seamlezz::surrealdb::call::HostWithStore for SharedCtx {
         params: Vec<(String, Vec<u8>)>,
     ) -> wasmtime::Result<(u64, StreamReader<BindingLiveEvent>)> {
         let (plugin, component_id) = accessor.with(|mut view| {
-            plugin_and_component_id(&view.get())
-                .map_err(|e| wasmtime::Error::msg(e.to_string()))
+            plugin_and_component_id(&view.get()).map_err(|e| wasmtime::Error::msg(e.to_string()))
         })?;
 
         let (subscription_id, receiver) =

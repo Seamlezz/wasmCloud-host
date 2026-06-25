@@ -6235,7 +6235,7 @@ dependencies = [
 [[package]]
 name = "wash-runtime"
 version = "2.4.0"
-source = "git+https://github.com/wasmCloud/wasmCloud?branch=wasmtime-46#e4396c52484fe395c60055b92a162752aef2f0b4"
+source = "git+https://github.com/wasmCloud/wasmCloud?branch=main#4c00664ae639e077adaf2127d3549e86521ec141"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -6448,7 +6448,7 @@ dependencies = [
 
 [[package]]
 name = "wasmcloud-host-runtime"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -6463,7 +6463,7 @@ dependencies = [
 
 [[package]]
 name = "wasmcloud-plugin-surrealdb"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "anyhow",
  "async-trait",

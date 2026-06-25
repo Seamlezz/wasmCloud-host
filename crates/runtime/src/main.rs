@@ -87,9 +87,16 @@ struct HostArgs {
         long = "registry-pull-timeout",
         value_parser = humantime::parse_duration,
         default_value = "30s",
-        env = "REGISTRY_PULL_TIMEOUT"
+        env = "REGISTRY_PULL_TIMEOUT",
     )]
     registry_pull_timeout: Duration,
+
+    #[arg(
+        long = "enable-fuel-meters",
+        env = "WASMCLOUD_ENABLE_FUEL_METERS",
+        default_value_t = false
+    )]
+    enable_fuel_meters: bool,
 
     #[arg(long = "oci-cache-dir", env = "OCI_CACHE_DIR")]
     oci_cache_dir: Option<PathBuf>,
@@ -173,9 +180,7 @@ async fn connect_nats_with_creds(
             .context("failed to load NATS credentials file")?;
     }
 
-    opts.connect(url)
-        .await
-        .context("failed to connect to NATS")
+    opts.connect(url).await.context("failed to connect to NATS")
 }
 
 #[tokio::main]
@@ -224,11 +229,11 @@ async fn main() -> anyhow::Result<()> {
         oci_cache_dir: args.oci_cache_dir,
     };
 
-    let otel_enabled = std::env::vars().any(|(key, _)| key.starts_with("OTEL_"));
+    let enable_fuel_meters = args.enable_fuel_meters;
 
     let engine = Engine::builder()
         .with_pooling_allocator(true)
-        .with_fuel_consumption(otel_enabled)
+        .with_fuel_consumption(enable_fuel_meters)
         .build()
         .context("failed to build engine")?;
 
@@ -249,7 +254,7 @@ async fn main() -> anyhow::Result<()> {
         .with_host_config(host_config)
         .with_nats_client(Arc::new(scheduler_nats))
         .with_host_group(args.host_group.clone())
-        .with_meters(Meters::new(otel_enabled))
+        .with_meters(Meters::new(enable_fuel_meters))
         .with_plugin(Arc::new(
             DynamicConfig::builder().copy_environment(true).build(),
         ))?

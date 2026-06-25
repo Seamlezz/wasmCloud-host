@@ -56,6 +56,7 @@ All host flags require the `host` subcommand: `wasmcloud-host host [flags]`. Glo
 | `--log-level` / `-l` | — | `info` |
 | `--verbose` / `-v` | — | `false` |
 | `--otel-debug` | `WASMCLOUD_OTEL_DEBUG` | `false` |
+| `--enable-fuel-meters` | `WASMCLOUD_ENABLE_FUEL_METERS` | `false` |
 | `--oci-cache-dir` | `OCI_CACHE_DIR` | — |
 | `--allow-insecure-registries` | `ALLOW_INSECURE_REGISTRIES` | `false` |
 | `--registry-pull-timeout` | `REGISTRY_PULL_TIMEOUT` | `30s` |
@@ -111,6 +112,7 @@ Open http://localhost:16686 to inspect traces. Guest workload telemetry (via `wa
 | `OTEL_RESOURCE_ATTRIBUTES` | Extra resource attributes (comma-separated `key=value`) |
 | `OTEL_TRACES_SAMPLER` | Trace sampling policy |
 | `WASMCLOUD_OTEL_DEBUG` | Sets host observability logging to debug and enables verbose runtime targets |
+| `WASMCLOUD_ENABLE_FUEL_METERS` | Enables Wasmtime fuel consumption and exports `fuel.consumption` host metric |
 | `RUST_LOG` | Log filter (overrides `--log-level` when set) |
 
 Map host identity into resource attributes:

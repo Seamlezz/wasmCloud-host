@@ -35,7 +35,7 @@ Add a `hostInterfaces` entry for `seamlezz:surrealdb/call@0.2.0` with:
 
 | Key | Required | Example |
 |-----|----------|---------|
-| `url` | yes | `memory`, `ws://127.0.0.1:8000` |
+| `url` | yes | `memory`, `http://127.0.0.1:8000`, `ws://127.0.0.1:8000`, `wss://db.example.com` |
 | `namespace` | yes | `dev` |
 | `database` | yes | `app` |
 | `username` | no | root user |

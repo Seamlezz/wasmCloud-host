@@ -3,7 +3,34 @@ use std::collections::HashMap;
 use anyhow::{Context as _, bail};
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
-use surrealdb::opt::auth::Root;
+use surrealdb::opt::auth::{
+    Database as DatabaseCredentials, Namespace as NamespaceCredentials, Root,
+};
+
+#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
+pub enum CredentialLevel {
+    Root,
+    Namespace,
+    Database,
+}
+
+impl CredentialLevel {
+    fn from_config(config: &HashMap<String, String>) -> anyhow::Result<Self> {
+        match config
+            .get("level")
+            .map(|v| v.trim())
+            .filter(|v| !v.is_empty())
+        {
+            None => Ok(Self::Root),
+            Some(level) if level.eq_ignore_ascii_case("root") => Ok(Self::Root),
+            Some(level) if level.eq_ignore_ascii_case("namespace") => Ok(Self::Namespace),
+            Some(level) if level.eq_ignore_ascii_case("database") => Ok(Self::Database),
+            Some(level) => bail!(
+                "seamlezz:surrealdb 'level' must be one of root, namespace, database, got '{level}'"
+            ),
+        }
+    }
+}
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct ConnectionKey {
@@ -12,6 +39,7 @@ pub struct ConnectionKey {
     pub database: String,
     pub username: Option<String>,
     pub password: Option<String>,
+    pub level: CredentialLevel,
 }
 
 impl ConnectionKey {
@@ -45,6 +73,7 @@ impl ConnectionKey {
 
         let username = config.get("username").cloned().filter(|v| !v.is_empty());
         let password = config.get("password").cloned().filter(|v| !v.is_empty());
+        let level = CredentialLevel::from_config(config)?;
 
         if username.is_some() && password.is_none() {
             bail!("seamlezz:surrealdb 'password' is required when 'username' is set");
@@ -56,6 +85,7 @@ impl ConnectionKey {
             database,
             username,
             password,
+            level,
         })
     }
 }
@@ -63,19 +93,41 @@ impl ConnectionKey {
 pub async fn connect(key: &ConnectionKey) -> anyhow::Result<Surreal<Any>> {
     let db: Surreal<Any> = Surreal::init();
     db.connect(&key.url).await?;
-    db.use_ns(&key.namespace).use_db(&key.database).await?;
 
     if let Some(username) = &key.username {
         let password = key
             .password
             .clone()
             .context("username set but password missing")?;
-        db.signin(Root {
-            username: username.clone(),
-            password,
-        })
-        .await?;
+        match key.level {
+            CredentialLevel::Root => {
+                db.signin(Root {
+                    username: username.clone(),
+                    password,
+                })
+                .await?;
+            }
+            CredentialLevel::Namespace => {
+                db.signin(NamespaceCredentials {
+                    namespace: key.namespace.clone(),
+                    username: username.clone(),
+                    password,
+                })
+                .await?;
+            }
+            CredentialLevel::Database => {
+                db.signin(DatabaseCredentials {
+                    namespace: key.namespace.clone(),
+                    database: key.database.clone(),
+                    username: username.clone(),
+                    password,
+                })
+                .await?;
+            }
+        }
     }
+
+    db.use_ns(&key.namespace).use_db(&key.database).await?;
 
     Ok(db)
 }
@@ -118,6 +170,7 @@ mod tests {
         assert_eq!(key.database, "db");
         assert!(key.username.is_none());
         assert!(key.password.is_none());
+        assert_eq!(key.level, CredentialLevel::Root);
     }
 
     #[test]
@@ -132,6 +185,47 @@ mod tests {
         let key = ConnectionKey::from_config(&cfg).unwrap();
         assert_eq!(key.username.as_deref(), Some("admin"));
         assert_eq!(key.password.as_deref(), Some("secret"));
+        assert_eq!(key.level, CredentialLevel::Root);
+    }
+
+    #[test]
+    fn valid_with_database_credentials() {
+        let cfg = config(&[
+            ("url", "memory"),
+            ("namespace", "ns"),
+            ("database", "db"),
+            ("username", "admin"),
+            ("password", "secret"),
+            ("level", "database"),
+        ]);
+        let key = ConnectionKey::from_config(&cfg).unwrap();
+        assert_eq!(key.level, CredentialLevel::Database);
+    }
+
+    #[test]
+    fn valid_with_namespace_credentials() {
+        let cfg = config(&[
+            ("url", "memory"),
+            ("namespace", "ns"),
+            ("database", "db"),
+            ("username", "admin"),
+            ("password", "secret"),
+            ("level", "namespace"),
+        ]);
+        let key = ConnectionKey::from_config(&cfg).unwrap();
+        assert_eq!(key.level, CredentialLevel::Namespace);
+    }
+
+    #[test]
+    fn invalid_level() {
+        let cfg = config(&[
+            ("url", "memory"),
+            ("namespace", "ns"),
+            ("database", "db"),
+            ("level", "record"),
+        ]);
+        let err = ConnectionKey::from_config(&cfg).unwrap_err();
+        assert!(err.to_string().contains("level"));
     }
 
     #[test]
@@ -220,6 +314,7 @@ mod tests {
             database: "db".to_string(),
             username: None,
             password: None,
+            level: CredentialLevel::Root,
         };
         assert_eq!(key.url_for_logging(), "ws://127.0.0.1:8000");
     }
@@ -232,6 +327,7 @@ mod tests {
             database: "db".to_string(),
             username: None,
             password: None,
+            level: CredentialLevel::Root,
         };
         assert_eq!(key.url_for_logging(), "memory");
     }

@@ -15,7 +15,7 @@ use wash_runtime::engine::workload::WorkloadItem;
 use wash_runtime::plugin::{HostPlugin, WitInterfaces, WorkloadTracker};
 use wash_runtime::wit::{WitInterface, WitWorld};
 
-pub use config::ConnectionKey;
+pub use config::{ConnectionKey, CredentialLevel};
 
 pub(crate) mod bindings {
     wasmtime::component::bindgen!({
@@ -140,8 +140,7 @@ impl HostPlugin for WasmcloudSurrealdb {
         item: &mut WorkloadItem<'a>,
         interfaces: WitInterfaces<'_>,
     ) -> anyhow::Result<()> {
-        let Some(iface) = interfaces.get("seamlezz", "surrealdb", &[])
-        else {
+        let Some(iface) = interfaces.get("seamlezz", "surrealdb", &[]) else {
             return Ok(());
         };
 
@@ -236,10 +235,7 @@ mod lifecycle_tests {
                     components: HashMap::new(),
                 })
                 .components
-                .insert(
-                    component_id.to_string(),
-                    ComponentBinding::new(key.clone()),
-                );
+                .insert(component_id.to_string(), ComponentBinding::new(key.clone()));
             tracker
                 .components
                 .insert(component_id.to_string(), workload_id.to_string());
@@ -299,10 +295,7 @@ mod lifecycle_tests {
                     components: HashMap::new(),
                 })
                 .components
-                .insert(
-                    component_id.to_string(),
-                    ComponentBinding::new(key.clone()),
-                );
+                .insert(component_id.to_string(), ComponentBinding::new(key.clone()));
             tracker
                 .components
                 .insert(component_id.to_string(), workload_id.to_string());

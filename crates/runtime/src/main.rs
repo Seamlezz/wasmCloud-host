@@ -4,7 +4,7 @@ use anyhow::Context as _;
 use clap::{Parser, Subcommand};
 use tracing::{Level, info};
 use wash_runtime::{
-    engine::Engine,
+    engine::{Engine, WasmProposal},
     host::{
         HostConfig,
         http::{DynamicRouter, HttpServer, TlsConfig},
@@ -130,6 +130,37 @@ struct HostArgs {
 
     #[arg(long = "tls-key-path", env = "TLS_KEY_PATH")]
     tls_key_path: Option<PathBuf>,
+
+    // Engine configuration
+    #[arg(
+        long = "wasm-proposal",
+        env = "WASMCLOUD_WASM_PROPOSALS",
+        value_delimiter = ',',
+        num_args = 0..,
+    )]
+    wasm_proposals: Vec<WasmProposal>,
+
+    #[arg(
+        long = "max-instances",
+        env = "WASMCLOUD_MAX_INSTANCES",
+        default_value_t = 1000
+    )]
+    max_instances: u32,
+
+    #[arg(
+        long = "compilation-cache-size",
+        env = "WASMCLOUD_COMPILATION_CACHE_SIZE",
+        default_value_t = 100
+    )]
+    compilation_cache_size: u64,
+
+    #[arg(
+        long = "compilation-cache-ttl",
+        env = "WASMCLOUD_COMPILATION_CACHE_TTL",
+        value_parser = humantime::parse_duration,
+        default_value = "600s"
+    )]
+    compilation_cache_ttl: Duration,
 }
 
 fn build_scheduler_nats_options(args: &HostArgs) -> NatsConnectionOptions {
@@ -231,9 +262,17 @@ async fn main() -> anyhow::Result<()> {
 
     let enable_fuel_meters = args.enable_fuel_meters;
 
-    let engine = Engine::builder()
+    let mut engine_builder = Engine::builder()
         .with_pooling_allocator(true)
         .with_fuel_consumption(enable_fuel_meters)
+        .with_max_instances(args.max_instances)
+        .with_compilation_cache(args.compilation_cache_size, args.compilation_cache_ttl);
+
+    for proposal in &args.wasm_proposals {
+        engine_builder = engine_builder.with_wasm_proposal(*proposal);
+    }
+
+    let engine = engine_builder
         .build()
         .context("failed to build engine")?;
 

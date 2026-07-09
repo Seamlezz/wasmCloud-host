@@ -58,6 +58,7 @@ wash-runtime = {
     "wasi-keyvalue",
     "wasi-logging",
     "wasi-otel",
+    "wasm_component_model_implements",
   ]
 }
 wasmcloud-plugin-surrealdb = { path = "crates/plugins/surrealdb" }
@@ -70,3 +71,13 @@ wasmtime = {
     "component-model-async",
   ]
 }
+
+# The wasm_component_model_implements feature requires the resource-implements
+# wasmtime feature (bytecodealliance/wasmtime#13666). It merged to main (47.0.0)
+# but is not on the 46 release branch. The fork backports it onto 46.
+# Retire this patch when moving to wasmtime 47.
+[patch."https://github.com/bytecodealliance/wasmtime"]
+wasmtime = { git = "https://github.com/ricochet/wasmtime", branch = "release-46.0.0-implements" }
+wasmtime-wasi = { git = "https://github.com/ricochet/wasmtime", branch = "release-46.0.0-implements" }
+wasmtime-wasi-io = { git = "https://github.com/ricochet/wasmtime", branch = "release-46.0.0-implements" }
+wasmtime-wasi-http = { git = "https://github.com/ricochet/wasmtime", branch = "release-46.0.0-implements" }

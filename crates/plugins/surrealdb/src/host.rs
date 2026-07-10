@@ -28,6 +28,17 @@ fn record_connection_key(key: &ConnectionKey) {
     observability::record_connection_key(&Span::current(), key);
 }
 
+fn record_query_result(rows: &[Result<Vec<u8>, String>]) {
+    let span = Span::current();
+    let failure_count = rows.iter().filter(|row| row.is_err()).count();
+    span.record("surrealdb.result.rows", rows.len());
+    span.record("surrealdb.query.failed", failure_count > 0);
+    span.record("surrealdb.query.failure.count", failure_count);
+    if let Some(message) = rows.iter().find_map(|row| row.as_ref().err()) {
+        span.record("surrealdb.query.failure.message", message.as_str());
+    }
+}
+
 async fn resolve_db(
     plugin: Arc<WasmcloudSurrealdb>,
     component_id: &str,
@@ -98,7 +109,6 @@ fn map_subscribe_error(error: SubscribeError) -> wasmtime::Error {
 #[tracing::instrument(
     skip_all,
     fields(
-        main = true,
         component_id = %component_id,
         plugin.id = PLUGIN_SURREALDB_ID,
         db.system = "surrealdb",
@@ -108,10 +118,13 @@ fn map_subscribe_error(error: SubscribeError) -> wasmtime::Error {
         surrealdb.database = tracing::field::Empty,
         surrealdb.credential.level = tracing::field::Empty,
         surrealdb.auth.configured = tracing::field::Empty,
-        db.query.text = %query,
+        db.query.text = %query.trim(),
         surrealdb.query.length = query.len(),
         surrealdb.params.count = params.len(),
         surrealdb.result.rows = tracing::field::Empty,
+        surrealdb.query.failed = tracing::field::Empty,
+        surrealdb.query.failure.count = tracing::field::Empty,
+        surrealdb.query.failure.message = tracing::field::Empty,
         error = tracing::field::Empty,
         exception.slug = tracing::field::Empty,
         exception.message = tracing::field::Empty,
@@ -133,7 +146,7 @@ async fn execute_query(
         .await
         .map_err(map_query_error);
     if let Ok(rows) = &result {
-        Span::current().record("surrealdb.result.rows", rows.len());
+        record_query_result(rows);
     }
     result
 }
@@ -141,7 +154,6 @@ async fn execute_query(
 #[tracing::instrument(
     skip_all,
     fields(
-        main = true,
         component_id = %component_id,
         plugin.id = PLUGIN_SURREALDB_ID,
         db.system = "surrealdb",
@@ -151,7 +163,7 @@ async fn execute_query(
         surrealdb.database = tracing::field::Empty,
         surrealdb.credential.level = tracing::field::Empty,
         surrealdb.auth.configured = tracing::field::Empty,
-        db.query.text = %query,
+        db.query.text = %query.trim(),
         surrealdb.query.length = query.len(),
         surrealdb.params.count = params.len(),
         surrealdb.subscription_id = tracing::field::Empty,
@@ -191,7 +203,6 @@ async fn execute_subscribe(
 
     let stream_span = tracing::info_span!(
         "surrealdb.subscription.stream",
-        main = true,
         component_id = %track_component_id,
         plugin.id = PLUGIN_SURREALDB_ID,
         db.system = "surrealdb",
@@ -283,7 +294,6 @@ async fn execute_subscribe(
 #[tracing::instrument(
     skip_all,
     fields(
-        main = true,
         component_id = %component_id,
         plugin.id = PLUGIN_SURREALDB_ID,
         db.system = "surrealdb",

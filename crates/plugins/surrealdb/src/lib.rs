@@ -138,7 +138,6 @@ impl HostPlugin for WasmcloudSurrealdb {
     #[instrument(
         skip_all,
         fields(
-            main = true,
             workload_id = item.workload_id(),
             component_id = item.id(),
             plugin.id = PLUGIN_SURREALDB_ID,
@@ -214,7 +213,6 @@ impl HostPlugin for WasmcloudSurrealdb {
     #[instrument(
         skip_all,
         fields(
-            main = true,
             workload_id = %workload_id,
             plugin.id = PLUGIN_SURREALDB_ID,
             db.system = "surrealdb",
@@ -278,7 +276,6 @@ impl HostPlugin for WasmcloudSurrealdb {
     #[instrument(
         skip_all,
         fields(
-            main = true,
             plugin.id = PLUGIN_SURREALDB_ID,
             db.system = "surrealdb",
             db.operation = "stop",

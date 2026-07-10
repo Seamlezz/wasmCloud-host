@@ -101,8 +101,11 @@ struct HostArgs {
     #[arg(long = "oci-cache-dir", env = "OCI_CACHE_DIR")]
     oci_cache_dir: Option<PathBuf>,
 
-    #[arg(long = "nats-creds", env = "NATS_CREDENTIALS")]
-    nats_creds: Option<PathBuf>,
+    #[arg(long = "scheduler-nats-creds", env = "SCHEDULER_NATS_CREDENTIALS")]
+    scheduler_nats_creds: Option<PathBuf>,
+
+    #[arg(long = "data-nats-creds", env = "DATA_NATS_CREDENTIALS")]
+    data_nats_creds: Option<PathBuf>,
 
     // Per-connection scheduler NATS TLS args
     #[arg(long = "scheduler-nats-tls-ca", env = "SCHEDULER_NATS_TLS_CA")]
@@ -240,7 +243,7 @@ async fn main() -> anyhow::Result<()> {
     let scheduler_nats = connect_nats_with_creds(
         args.scheduler_nats_url.clone(),
         scheduler_nats_options,
-        args.nats_creds.clone(),
+        args.scheduler_nats_creds.clone(),
     )
     .await
     .context("failed to connect to scheduler NATS")?;
@@ -248,7 +251,7 @@ async fn main() -> anyhow::Result<()> {
     let data_nats = connect_nats_with_creds(
         args.data_nats_url.clone(),
         data_nats_options,
-        args.nats_creds.clone(),
+        args.data_nats_creds.clone(),
     )
     .await
     .context("failed to connect to data NATS")?;

@@ -71,7 +71,8 @@ All host flags require the `host` subcommand: `wasmcloud-host host [flags]`. Glo
 | `--data-nats-tls-ca` | `DATA_NATS_TLS_CA` |
 | `--data-nats-tls-cert` | `DATA_NATS_TLS_CERT` |
 | `--data-nats-tls-key` | `DATA_NATS_TLS_KEY` |
-| `--nats-creds` | `NATS_CREDENTIALS` |
+| `--scheduler-nats-creds` | `SCHEDULER_NATS_CREDENTIALS` |
+| `--data-nats-creds` | `DATA_NATS_CREDENTIALS` |
 
 ### HTTP TLS
 

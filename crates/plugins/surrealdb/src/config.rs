@@ -15,6 +15,14 @@ pub enum CredentialLevel {
 }
 
 impl CredentialLevel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Root => "root",
+            Self::Namespace => "namespace",
+            Self::Database => "database",
+        }
+    }
+
     fn from_config(config: &HashMap<String, String>) -> anyhow::Result<Self> {
         match config
             .get("level")

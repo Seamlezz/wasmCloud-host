@@ -275,9 +275,7 @@ async fn main() -> anyhow::Result<()> {
         engine_builder = engine_builder.with_wasm_proposal(*proposal);
     }
 
-    let engine = engine_builder
-        .build()
-        .context("failed to build engine")?;
+    let engine = engine_builder.build().context("failed to build engine")?;
 
     let http = match (&args.tls_cert_path, &args.tls_key_path) {
         (Some(cert_path), Some(key_path)) => {

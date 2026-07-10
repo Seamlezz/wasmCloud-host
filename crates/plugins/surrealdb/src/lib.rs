@@ -1,5 +1,6 @@
 mod config;
 mod host;
+mod observability;
 mod streams;
 
 use std::collections::{HashMap, HashSet};
@@ -9,7 +10,7 @@ use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
 use surrealdb_host_adapter::SubscriptionManager;
 use tokio::sync::RwLock;
-use tracing::instrument;
+use tracing::{Span, instrument};
 use wash_runtime::engine::ctx::{SharedCtx, extract_active_ctx};
 use wash_runtime::engine::workload::WorkloadItem;
 use wash_runtime::plugin::{HostPlugin, WitInterfaces, WorkloadTracker};
@@ -134,46 +135,117 @@ impl HostPlugin for WasmcloudSurrealdb {
         }
     }
 
-    #[instrument(skip_all, fields(workload_id = item.workload_id(), component_id = item.id()))]
+    #[instrument(
+        skip_all,
+        fields(
+            main = true,
+            workload_id = item.workload_id(),
+            component_id = item.id(),
+            plugin.id = PLUGIN_SURREALDB_ID,
+            wasmcloud.interface = "seamlezz:surrealdb/call@0.2.0",
+            db.system = "surrealdb",
+            db.operation = "bind",
+            surrealdb.interface.present = tracing::field::Empty,
+            surrealdb.url = tracing::field::Empty,
+            surrealdb.namespace = tracing::field::Empty,
+            surrealdb.database = tracing::field::Empty,
+            surrealdb.credential.level = tracing::field::Empty,
+            surrealdb.auth.configured = tracing::field::Empty,
+            surrealdb.connection.reused = tracing::field::Empty,
+            surrealdb.connection.pool.size = tracing::field::Empty,
+            error = tracing::field::Empty,
+            exception.slug = tracing::field::Empty,
+            exception.message = tracing::field::Empty,
+        )
+    )]
     async fn on_workload_item_bind<'a>(
         &self,
         item: &mut WorkloadItem<'a>,
         interfaces: WitInterfaces<'_>,
     ) -> anyhow::Result<()> {
-        let Some(iface) = interfaces.get("seamlezz", "surrealdb", &[]) else {
-            return Ok(());
-        };
+        let span = Span::current();
+        async {
+            let Some(iface) = interfaces.get("seamlezz", "surrealdb", &[]) else {
+                span.record("surrealdb.interface.present", false);
+                return Ok(());
+            };
+            span.record("surrealdb.interface.present", true);
 
-        let WorkloadItem::Component(component) = item else {
-            return Ok(());
-        };
+            let WorkloadItem::Component(component) = item else {
+                return Ok(());
+            };
 
-        let key = ConnectionKey::from_config(&iface.config)?;
-        self.get_or_create_connection(&key).await?;
+            let key = ConnectionKey::from_config(&iface.config).inspect_err(|error| {
+                observability::record_error(&span, "surrealdb-config-invalid", error.to_string());
+            })?;
+            observability::record_connection_key(&span, &key);
 
-        let span = tracing::Span::current();
-        span.record("surrealdb.url", key.url_for_logging().as_str());
-        span.record("surrealdb.namespace", key.namespace.as_str());
-        span.record("surrealdb.database", key.database.as_str());
+            let reused = self.connections.read().await.contains_key(&key);
+            self.get_or_create_connection(&key)
+                .await
+                .inspect_err(|error| {
+                    observability::record_error(
+                        &span,
+                        "surrealdb-connection-failed",
+                        error.to_string(),
+                    );
+                })?;
+            let pool_size = self.connections.read().await.len();
+            observability::record_connection_pool(&span, reused, pool_size);
 
-        self.tracker
-            .write()
-            .await
-            .add_component(component, ComponentBinding::new(key));
+            self.tracker
+                .write()
+                .await
+                .add_component(component, ComponentBinding::new(key));
 
-        bindings::seamlezz::surrealdb::call::add_to_linker::<_, SharedCtx>(
-            component.linker(),
-            extract_active_ctx,
-        )?;
+            bindings::seamlezz::surrealdb::call::add_to_linker::<_, SharedCtx>(
+                component.linker(),
+                extract_active_ctx,
+            )
+            .inspect_err(|error| {
+                observability::record_error(&span, "surrealdb-linker-failed", error.to_string());
+            })?;
 
-        Ok(())
+            Ok(())
+        }
+        .await
     }
 
+    #[instrument(
+        skip_all,
+        fields(
+            main = true,
+            workload_id = %workload_id,
+            plugin.id = PLUGIN_SURREALDB_ID,
+            db.system = "surrealdb",
+            db.operation = "unbind",
+            surrealdb.subscriptions.cancelled = tracing::field::Empty,
+            surrealdb.connections.evicted = tracing::field::Empty,
+            error = tracing::field::Empty,
+            exception.slug = tracing::field::Empty,
+            exception.message = tracing::field::Empty,
+        )
+    )]
     async fn on_workload_unbind(
         &self,
         workload_id: &str,
         _interfaces: WitInterfaces<'_>,
     ) -> anyhow::Result<()> {
+        let span = Span::current();
+        let subscriptions_cancelled = self
+            .tracker
+            .read()
+            .await
+            .workloads
+            .get(workload_id)
+            .map(|item| {
+                item.components
+                    .values()
+                    .map(|binding| binding.subscription_ids.len())
+                    .sum::<usize>()
+            })
+            .unwrap_or_default();
+        let connection_count = self.connections.read().await.len();
         let manager = Arc::clone(&self.subscription_manager);
 
         self.tracker
@@ -194,9 +266,24 @@ impl HostPlugin for WasmcloudSurrealdb {
             .await;
 
         self.evict_unused_connections().await;
+        let remaining_connection_count = self.connections.read().await.len();
+        span.record("surrealdb.subscriptions.cancelled", subscriptions_cancelled);
+        span.record(
+            "surrealdb.connections.evicted",
+            connection_count.saturating_sub(remaining_connection_count),
+        );
         Ok(())
     }
 
+    #[instrument(
+        skip_all,
+        fields(
+            main = true,
+            plugin.id = PLUGIN_SURREALDB_ID,
+            db.system = "surrealdb",
+            db.operation = "stop",
+        )
+    )]
     async fn stop(&self) -> anyhow::Result<()> {
         self.subscription_manager.shutdown().await;
         Ok(())

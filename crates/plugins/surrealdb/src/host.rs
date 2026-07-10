@@ -1,11 +1,10 @@
 use std::sync::Arc;
-use std::time::Instant;
 
 use futures_util::StreamExt;
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
 use tokio::sync::{RwLock, mpsc, oneshot};
-use tracing::Span;
+use tracing::{Instrument, Span};
 use wasmtime::component::{Accessor, StreamReader};
 
 use surrealdb_host_adapter::{QueryError, SubscribeError, SubscriptionTask};
@@ -13,6 +12,7 @@ use wash_runtime::engine::ctx::{ActiveCtx, SharedCtx};
 
 use super::WasmcloudSurrealdb;
 use super::config::ConnectionKey;
+use super::observability;
 use super::streams::{LiveEventProducer, to_binding_live_event};
 use super::{PLUGIN_SURREALDB_ID, bindings};
 
@@ -20,20 +20,12 @@ type BindingLiveEvent = bindings::seamlezz::surrealdb::call::LiveEvent;
 
 impl bindings::seamlezz::surrealdb::call::Host for ActiveCtx<'_> {}
 
-fn record_span_error(slug: &'static str) {
-    Span::current().record("error", true);
-    Span::current().record("exception.slug", slug);
-}
-
-fn record_duration(start: Instant) {
-    Span::current().record("surrealdb.duration_ms", start.elapsed().as_millis() as u64);
+fn record_span_error(slug: &'static str, message: impl AsRef<str>) {
+    observability::record_error(&Span::current(), slug, message);
 }
 
 fn record_connection_key(key: &ConnectionKey) {
-    let span = Span::current();
-    span.record("surrealdb.url", key.url_for_logging().as_str());
-    span.record("surrealdb.namespace", key.namespace.as_str());
-    span.record("surrealdb.database", key.database.as_str());
+    observability::record_connection_key(&Span::current(), key);
 }
 
 async fn resolve_db(
@@ -52,12 +44,13 @@ async fn resolve_db(
 }
 
 fn map_resolve_error(error: anyhow::Error) -> wasmtime::Error {
-    if error.to_string().contains("not bound") {
-        record_span_error("surrealdb-component-not-bound");
+    let message = error.to_string();
+    if message.contains("not bound") {
+        record_span_error("surrealdb-component-not-bound", &message);
     } else {
-        record_span_error("surrealdb-connection-failed");
+        record_span_error("surrealdb-connection-failed", &message);
     }
-    wasmtime::Error::msg(error.to_string())
+    wasmtime::Error::msg(message)
 }
 
 fn plugin_and_component_id(
@@ -72,11 +65,12 @@ fn plugin_and_component_id(
 fn map_query_error(error: QueryError) -> wasmtime::Error {
     match error {
         QueryError::ParamDecode { key, source } => {
-            record_span_error("surrealdb-param-decode");
-            wasmtime::Error::msg(format!("param decode {key}: {source}"))
+            let message = format!("param decode {key}: {source}");
+            record_span_error("surrealdb-param-decode", &message);
+            wasmtime::Error::msg(message)
         }
         QueryError::QueryExecution(source) => {
-            record_span_error("surrealdb-query-failed");
+            record_span_error("surrealdb-query-failed", source.to_string());
             wasmtime::Error::new(source)
         }
     }
@@ -85,16 +79,18 @@ fn map_query_error(error: QueryError) -> wasmtime::Error {
 fn map_subscribe_error(error: SubscribeError) -> wasmtime::Error {
     match error {
         SubscribeError::ParamDecode { key, source } => {
-            record_span_error("surrealdb-param-decode");
-            wasmtime::Error::msg(format!("param decode {key}: {source}"))
+            let message = format!("param decode {key}: {source}");
+            record_span_error("surrealdb-param-decode", &message);
+            wasmtime::Error::msg(message)
         }
         SubscribeError::QueryExecution(source) | SubscribeError::StreamOpen(source) => {
-            record_span_error("surrealdb-subscribe-failed");
+            record_span_error("surrealdb-subscribe-failed", source.to_string());
             wasmtime::Error::new(source)
         }
         SubscribeError::Serialize(source) => {
-            record_span_error("surrealdb-subscribe-failed");
-            wasmtime::Error::msg(source.to_string())
+            let message = source.to_string();
+            record_span_error("surrealdb-subscribe-failed", &message);
+            wasmtime::Error::msg(message)
         }
     }
 }
@@ -104,17 +100,21 @@ fn map_subscribe_error(error: SubscribeError) -> wasmtime::Error {
     fields(
         main = true,
         component_id = %component_id,
+        plugin.id = PLUGIN_SURREALDB_ID,
         db.system = "surrealdb",
         db.operation = "query",
         surrealdb.url = tracing::field::Empty,
         surrealdb.namespace = tracing::field::Empty,
         surrealdb.database = tracing::field::Empty,
+        surrealdb.credential.level = tracing::field::Empty,
+        surrealdb.auth.configured = tracing::field::Empty,
+        db.query.text = %query,
         surrealdb.query.length = query.len(),
         surrealdb.params.count = params.len(),
         surrealdb.result.rows = tracing::field::Empty,
-        surrealdb.duration_ms = tracing::field::Empty,
         error = tracing::field::Empty,
         exception.slug = tracing::field::Empty,
+        exception.message = tracing::field::Empty,
     )
 )]
 async fn execute_query(
@@ -123,7 +123,6 @@ async fn execute_query(
     query: String,
     params: Vec<(String, Vec<u8>)>,
 ) -> wasmtime::Result<Vec<Result<Vec<u8>, String>>> {
-    let start = Instant::now();
     let (key, db) = resolve_db(plugin, &component_id)
         .await
         .map_err(map_resolve_error)?;
@@ -133,7 +132,6 @@ async fn execute_query(
     let result = surrealdb_host_adapter::query(&guard, query, params)
         .await
         .map_err(map_query_error);
-    record_duration(start);
     if let Ok(rows) = &result {
         Span::current().record("surrealdb.result.rows", rows.len());
     }
@@ -145,17 +143,21 @@ async fn execute_query(
     fields(
         main = true,
         component_id = %component_id,
+        plugin.id = PLUGIN_SURREALDB_ID,
         db.system = "surrealdb",
         db.operation = "subscribe",
         surrealdb.url = tracing::field::Empty,
         surrealdb.namespace = tracing::field::Empty,
         surrealdb.database = tracing::field::Empty,
+        surrealdb.credential.level = tracing::field::Empty,
+        surrealdb.auth.configured = tracing::field::Empty,
+        db.query.text = %query,
         surrealdb.query.length = query.len(),
         surrealdb.params.count = params.len(),
         surrealdb.subscription_id = tracing::field::Empty,
-        surrealdb.duration_ms = tracing::field::Empty,
         error = tracing::field::Empty,
         exception.slug = tracing::field::Empty,
+        exception.message = tracing::field::Empty,
     )
 )]
 async fn execute_subscribe(
@@ -164,7 +166,6 @@ async fn execute_subscribe(
     params: Vec<(String, Vec<u8>)>,
     component_id: String,
 ) -> wasmtime::Result<(u64, mpsc::UnboundedReceiver<BindingLiveEvent>)> {
-    let start = Instant::now();
     let subscriptions = Arc::clone(&plugin.subscription_manager);
     let (key, db) = resolve_db(Arc::clone(&plugin), &component_id)
         .await
@@ -188,34 +189,85 @@ async fn execute_subscribe(
     let track_plugin = Arc::clone(&plugin);
     let track_component_id = component_id.clone();
 
-    let handle = tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                _ = &mut stop_rx => break,
-                notification = stream.next() => {
-                    let Some(Ok(notification)) = notification else {
-                        break;
-                    };
+    let stream_span = tracing::info_span!(
+        "surrealdb.subscription.stream",
+        main = true,
+        component_id = %track_component_id,
+        plugin.id = PLUGIN_SURREALDB_ID,
+        db.system = "surrealdb",
+        db.operation = "subscribe.stream",
+        surrealdb.subscription_id = subscription_id,
+        surrealdb.events.sent = tracing::field::Empty,
+        surrealdb.stream.end_reason = tracing::field::Empty,
+        error = tracing::field::Empty,
+        exception.slug = tracing::field::Empty,
+        exception.message = tracing::field::Empty,
+    );
 
-                    let Ok(event) = surrealdb_host_adapter::notification_to_live_event(
-                        subscription_id,
-                        notification,
-                    ) else {
+    let handle = tokio::spawn(
+        async move {
+            let span = Span::current();
+            let mut events_sent = 0_u64;
+            let end_reason;
+            loop {
+                tokio::select! {
+                    _ = &mut stop_rx => {
+                        end_reason = "cancelled";
                         break;
-                    };
+                    },
+                    notification = stream.next() => {
+                        let Some(notification) = notification else {
+                            end_reason = "stream-ended";
+                            break;
+                        };
 
-                    if sender.send(to_binding_live_event(event)).is_err() {
-                        break;
+                        let notification = match notification {
+                            Ok(notification) => notification,
+                            Err(error) => {
+                                observability::record_error(
+                                    &span,
+                                    "surrealdb-live-stream-failed",
+                                    error.to_string(),
+                                );
+                                end_reason = "stream-error";
+                                break;
+                            }
+                        };
+
+                        let event = match surrealdb_host_adapter::notification_to_live_event(
+                            subscription_id,
+                            notification,
+                        ) {
+                            Ok(event) => event,
+                            Err(error) => {
+                                observability::record_error(
+                                    &span,
+                                    "surrealdb-live-event-conversion-failed",
+                                    error.to_string(),
+                                );
+                                end_reason = "event-conversion-failed";
+                                break;
+                            }
+                        };
+
+                        if sender.send(to_binding_live_event(event)).is_err() {
+                            end_reason = "receiver-dropped";
+                            break;
+                        }
+                        events_sent += 1;
                     }
                 }
             }
-        }
 
-        task_subscriptions.complete(subscription_id).await;
-        track_plugin
-            .untrack_subscription(&track_component_id, subscription_id)
-            .await;
-    });
+            span.record("surrealdb.events.sent", events_sent);
+            span.record("surrealdb.stream.end_reason", end_reason);
+            task_subscriptions.complete(subscription_id).await;
+            track_plugin
+                .untrack_subscription(&track_component_id, subscription_id)
+                .await;
+        }
+        .instrument(stream_span),
+    );
 
     subscriptions
         .register(subscription_id, SubscriptionTask::new(stop_tx, handle))
@@ -225,7 +277,6 @@ async fn execute_subscribe(
         .track_subscription(&component_id, subscription_id)
         .await;
 
-    record_duration(start);
     Ok((subscription_id, receiver))
 }
 
@@ -234,12 +285,13 @@ async fn execute_subscribe(
     fields(
         main = true,
         component_id = %component_id,
+        plugin.id = PLUGIN_SURREALDB_ID,
         db.system = "surrealdb",
         db.operation = "cancel",
         surrealdb.subscription_id = subscription_id,
-        surrealdb.duration_ms = tracing::field::Empty,
         error = tracing::field::Empty,
         exception.slug = tracing::field::Empty,
+        exception.message = tracing::field::Empty,
     )
 )]
 async fn execute_cancel(
@@ -248,15 +300,13 @@ async fn execute_cancel(
     subscription_id: u64,
 ) -> wasmtime::Result<Result<(), String>> {
     let _ = component_id;
-    let start = Instant::now();
-    let result = if subscriptions.cancel(subscription_id).await {
+    if subscriptions.cancel(subscription_id).await {
         Ok(Ok(()))
     } else {
-        record_span_error("surrealdb-subscription-not-found");
-        Ok(Err(format!("subscription {subscription_id} not found")))
-    };
-    record_duration(start);
-    result
+        let message = format!("subscription {subscription_id} not found");
+        record_span_error("surrealdb-subscription-not-found", &message);
+        Ok(Err(message))
+    }
 }
 
 impl<T: Send + 'static> bindings::seamlezz::surrealdb::call::HostWithStore<T> for SharedCtx {

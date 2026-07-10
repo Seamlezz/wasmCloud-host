@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/plugins/surrealdb/", "crates/runtime/"]
 
 [workspace.package]
-version = "1.4.0"
+version = "2.0.0"
 edition = "2024"
 rust-version = "1.95.0"
 repository = "https://github.com/Seamlezz/wasmCloud-host"

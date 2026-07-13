@@ -47,7 +47,7 @@ tracing-subscriber = {
 }
 # wash-runtime 2.x is not on crates.io yet (upstream publish = false). Pin to release tag.
 wash-runtime = {
-  git = "https://github.com/wasmCloud/wasmCloud",
+  git = "https://github.com/gabber235/wasmCloud",
   # tag = "v2.4.0"
   branch = "main",
   default-features = false,

@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/plugins/surrealdb/", "crates/runtime/"]
 
 [workspace.package]
-version = "2.1.0"
+version = "2.1.1"
 edition = "2024"
 rust-version = "1.95.0"
 repository = "https://github.com/Seamlezz/wasmCloud-host"
@@ -45,11 +45,9 @@ tracing-subscriber = {
   default-features = false,
   features = ["env-filter", "fmt"]
 }
-# wash-runtime 2.x is not on crates.io yet (upstream publish = false). Pin to release tag.
 wash-runtime = {
   git = "https://github.com/gabber235/wasmCloud",
-  # tag = "v2.4.0"
-  branch = "main",
+  rev = "e00f9968ba9214ae883cf69f4d8e874935a5e613",
   default-features = false,
   features = [
     "washlet",

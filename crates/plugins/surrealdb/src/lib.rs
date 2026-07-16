@@ -130,7 +130,7 @@ impl HostPlugin for WasmcloudSurrealdb {
 
     fn world(&self) -> WitWorld {
         WitWorld {
-            imports: HashSet::from([WitInterface::from("seamlezz:surrealdb/call@0.2.0")]),
+            imports: HashSet::from([WitInterface::from("seamlezz:surrealdb/call@0.3.0")]),
             ..Default::default()
         }
     }
@@ -141,7 +141,7 @@ impl HostPlugin for WasmcloudSurrealdb {
             workload_id = item.workload_id(),
             component_id = item.id(),
             plugin.id = PLUGIN_SURREALDB_ID,
-            wasmcloud.interface = "seamlezz:surrealdb/call@0.2.0",
+            wasmcloud.interface = "seamlezz:surrealdb/call@0.3.0",
             db.system = "surrealdb",
             db.operation = "bind",
             surrealdb.interface.present = tracing::field::Empty,

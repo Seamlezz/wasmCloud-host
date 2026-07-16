@@ -1,10 +1,14 @@
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
 use futures_util::StreamExt;
+use opentelemetry::propagation::{Extractor, TextMapPropagator as _};
+use opentelemetry::trace::{TraceContextExt as _, TraceState};
+use opentelemetry_sdk::propagation::TraceContextPropagator;
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
 use tokio::sync::{RwLock, mpsc, oneshot};
 use tracing::{Instrument, Span};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use wasmtime::component::{Accessor, StreamReader};
 
 use surrealdb_host_adapter::{QueryError, SubscribeError, SubscriptionTask};
@@ -17,6 +21,54 @@ use super::streams::{LiveEventProducer, to_binding_live_event};
 use super::{PLUGIN_SURREALDB_ID, bindings};
 
 type BindingLiveEvent = bindings::seamlezz::surrealdb::call::LiveEvent;
+type BindingTraceContext = bindings::wasmcloud::observability::propagation::TraceContext;
+
+impl Extractor for BindingTraceContext {
+    fn get(&self, key: &str) -> Option<&str> {
+        match key {
+            "traceparent" => Some(&self.traceparent),
+            "tracestate" => self.tracestate.as_deref(),
+            _ => None,
+        }
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        vec!["traceparent", "tracestate"]
+    }
+}
+
+fn set_explicit_parent(span: &Span, parent: Option<BindingTraceContext>) {
+    let invalid_tracestate = parent
+        .as_ref()
+        .and_then(|parent| parent.tracestate.as_deref())
+        .is_some_and(|tracestate| TraceState::from_str(tracestate).is_err());
+    let context = (!invalid_tracestate)
+        .then(|| {
+            parent
+                .as_ref()
+                .map(|parent| TraceContextPropagator::new().extract(parent))
+                .filter(|context| context.span().span_context().is_valid())
+        })
+        .flatten();
+
+    if parent.is_some() && context.is_none() {
+        observability::record_error(
+            span,
+            "capability-invalid-parent-context",
+            "invalid W3C trace context",
+        );
+        span.record("otel.propagation.error", true);
+    }
+    let context = context.unwrap_or_default();
+
+    if let Err(error) = span.set_parent(context) {
+        observability::record_error(
+            span,
+            "surrealdb-parent-context-setup-failed",
+            error.to_string(),
+        );
+    }
+}
 
 impl bindings::seamlezz::surrealdb::call::Host for ActiveCtx<'_> {}
 
@@ -34,8 +86,12 @@ fn record_query_result(rows: &[Result<Vec<u8>, String>]) {
     span.record("surrealdb.result.rows", rows.len());
     span.record("surrealdb.query.failed", failure_count > 0);
     span.record("surrealdb.query.failure.count", failure_count);
-    if let Some(message) = rows.iter().find_map(|row| row.as_ref().err()) {
-        span.record("surrealdb.query.failure.message", message.as_str());
+    if failure_count > 0 {
+        observability::record_error(
+            &span,
+            "surrealdb-query-results-failed",
+            "one or more SurrealDB query results failed",
+        );
     }
 }
 
@@ -77,11 +133,11 @@ fn map_query_error(error: QueryError) -> wasmtime::Error {
     match error {
         QueryError::ParamDecode { key, source } => {
             let message = format!("param decode {key}: {source}");
-            record_span_error("surrealdb-param-decode", &message);
+            record_span_error("surrealdb-param-decode", "query parameter decoding failed");
             wasmtime::Error::msg(message)
         }
         QueryError::QueryExecution(source) => {
-            record_span_error("surrealdb-query-failed", source.to_string());
+            record_span_error("surrealdb-query-failed", "query execution failed");
             wasmtime::Error::new(source)
         }
     }
@@ -91,16 +147,19 @@ fn map_subscribe_error(error: SubscribeError) -> wasmtime::Error {
     match error {
         SubscribeError::ParamDecode { key, source } => {
             let message = format!("param decode {key}: {source}");
-            record_span_error("surrealdb-param-decode", &message);
+            record_span_error("surrealdb-param-decode", "query parameter decoding failed");
             wasmtime::Error::msg(message)
         }
         SubscribeError::QueryExecution(source) | SubscribeError::StreamOpen(source) => {
-            record_span_error("surrealdb-subscribe-failed", source.to_string());
+            record_span_error("surrealdb-subscribe-failed", "subscription setup failed");
             wasmtime::Error::new(source)
         }
         SubscribeError::Serialize(source) => {
             let message = source.to_string();
-            record_span_error("surrealdb-subscribe-failed", &message);
+            record_span_error(
+                "surrealdb-subscribe-failed",
+                "subscription serialization failed",
+            );
             wasmtime::Error::msg(message)
         }
     }
@@ -111,20 +170,21 @@ fn map_subscribe_error(error: SubscribeError) -> wasmtime::Error {
     fields(
         component_id = %component_id,
         plugin.id = PLUGIN_SURREALDB_ID,
-        db.system = "surrealdb",
-        db.operation = "query",
+        otel.kind = "client",
+        db.system.name = "surrealdb",
+        db.operation.name = "query",
         surrealdb.url = tracing::field::Empty,
         surrealdb.namespace = tracing::field::Empty,
         surrealdb.database = tracing::field::Empty,
         surrealdb.credential.level = tracing::field::Empty,
         surrealdb.auth.configured = tracing::field::Empty,
-        db.query.text = %query.trim(),
         surrealdb.query.length = query.len(),
         surrealdb.params.count = params.len(),
         surrealdb.result.rows = tracing::field::Empty,
         surrealdb.query.failed = tracing::field::Empty,
         surrealdb.query.failure.count = tracing::field::Empty,
         surrealdb.query.failure.message = tracing::field::Empty,
+        otel.propagation.error = tracing::field::Empty,
         error = tracing::field::Empty,
         exception.slug = tracing::field::Empty,
         exception.message = tracing::field::Empty,
@@ -133,9 +193,11 @@ fn map_subscribe_error(error: SubscribeError) -> wasmtime::Error {
 async fn execute_query(
     plugin: Arc<WasmcloudSurrealdb>,
     component_id: String,
+    parent: Option<BindingTraceContext>,
     query: String,
     params: Vec<(String, Vec<u8>)>,
 ) -> wasmtime::Result<Vec<Result<Vec<u8>, String>>> {
+    set_explicit_parent(&Span::current(), parent);
     let (key, db) = resolve_db(plugin, &component_id)
         .await
         .map_err(map_resolve_error)?;
@@ -156,17 +218,18 @@ async fn execute_query(
     fields(
         component_id = %component_id,
         plugin.id = PLUGIN_SURREALDB_ID,
-        db.system = "surrealdb",
-        db.operation = "subscribe",
+        otel.kind = "client",
+        db.system.name = "surrealdb",
+        db.operation.name = "subscribe",
         surrealdb.url = tracing::field::Empty,
         surrealdb.namespace = tracing::field::Empty,
         surrealdb.database = tracing::field::Empty,
         surrealdb.credential.level = tracing::field::Empty,
         surrealdb.auth.configured = tracing::field::Empty,
-        db.query.text = %query.trim(),
         surrealdb.query.length = query.len(),
         surrealdb.params.count = params.len(),
         surrealdb.subscription_id = tracing::field::Empty,
+        otel.propagation.error = tracing::field::Empty,
         error = tracing::field::Empty,
         exception.slug = tracing::field::Empty,
         exception.message = tracing::field::Empty,
@@ -174,10 +237,12 @@ async fn execute_query(
 )]
 async fn execute_subscribe(
     plugin: Arc<WasmcloudSurrealdb>,
+    parent: Option<BindingTraceContext>,
     query: String,
     params: Vec<(String, Vec<u8>)>,
     component_id: String,
 ) -> wasmtime::Result<(u64, mpsc::UnboundedReceiver<BindingLiveEvent>)> {
+    set_explicit_parent(&Span::current(), parent);
     let subscriptions = Arc::clone(&plugin.subscription_manager);
     let (key, db) = resolve_db(Arc::clone(&plugin), &component_id)
         .await
@@ -205,11 +270,12 @@ async fn execute_subscribe(
         "surrealdb.subscription.stream",
         component_id = %track_component_id,
         plugin.id = PLUGIN_SURREALDB_ID,
-        db.system = "surrealdb",
-        db.operation = "subscribe.stream",
+        db.system.name = "surrealdb",
+        db.operation.name = "subscribe.stream",
         surrealdb.subscription_id = subscription_id,
         surrealdb.events.sent = tracing::field::Empty,
         surrealdb.stream.end_reason = tracing::field::Empty,
+        otel.propagation.error = tracing::field::Empty,
         error = tracing::field::Empty,
         exception.slug = tracing::field::Empty,
         exception.message = tracing::field::Empty,
@@ -234,11 +300,11 @@ async fn execute_subscribe(
 
                         let notification = match notification {
                             Ok(notification) => notification,
-                            Err(error) => {
+                            Err(_error) => {
                                 observability::record_error(
                                     &span,
                                     "surrealdb-live-stream-failed",
-                                    error.to_string(),
+                                    "subscription stream failed",
                                 );
                                 end_reason = "stream-error";
                                 break;
@@ -250,11 +316,11 @@ async fn execute_subscribe(
                             notification,
                         ) {
                             Ok(event) => event,
-                            Err(error) => {
+                            Err(_error) => {
                                 observability::record_error(
                                     &span,
                                     "surrealdb-live-event-conversion-failed",
-                                    error.to_string(),
+                                    "live event conversion failed",
                                 );
                                 end_reason = "event-conversion-failed";
                                 break;
@@ -296,9 +362,11 @@ async fn execute_subscribe(
     fields(
         component_id = %component_id,
         plugin.id = PLUGIN_SURREALDB_ID,
-        db.system = "surrealdb",
-        db.operation = "cancel",
+        otel.kind = "client",
+        db.system.name = "surrealdb",
+        db.operation.name = "cancel",
         surrealdb.subscription_id = subscription_id,
+        otel.propagation.error = tracing::field::Empty,
         error = tracing::field::Empty,
         exception.slug = tracing::field::Empty,
         exception.message = tracing::field::Empty,
@@ -307,8 +375,10 @@ async fn execute_subscribe(
 async fn execute_cancel(
     subscriptions: Arc<surrealdb_host_adapter::SubscriptionManager>,
     component_id: String,
+    parent: Option<BindingTraceContext>,
     subscription_id: u64,
 ) -> wasmtime::Result<Result<(), String>> {
+    set_explicit_parent(&Span::current(), parent);
     let _ = component_id;
     if subscriptions.cancel(subscription_id).await {
         Ok(Ok(()))
@@ -322,6 +392,7 @@ async fn execute_cancel(
 impl<T: Send + 'static> bindings::seamlezz::surrealdb::call::HostWithStore<T> for SharedCtx {
     async fn query(
         accessor: &Accessor<T, Self>,
+        parent: Option<BindingTraceContext>,
         query: String,
         params: Vec<(String, Vec<u8>)>,
     ) -> wasmtime::Result<Vec<Result<Vec<u8>, String>>> {
@@ -329,11 +400,12 @@ impl<T: Send + 'static> bindings::seamlezz::surrealdb::call::HostWithStore<T> fo
             plugin_and_component_id(&view.get()).map_err(|e| wasmtime::Error::msg(e.to_string()))
         })?;
 
-        execute_query(plugin, component_id, query, params).await
+        execute_query(plugin, component_id, parent, query, params).await
     }
 
     async fn subscribe(
         accessor: &Accessor<T, Self>,
+        parent: Option<BindingTraceContext>,
         query: String,
         params: Vec<(String, Vec<u8>)>,
     ) -> wasmtime::Result<(u64, StreamReader<BindingLiveEvent>)> {
@@ -342,7 +414,7 @@ impl<T: Send + 'static> bindings::seamlezz::surrealdb::call::HostWithStore<T> fo
         })?;
 
         let (subscription_id, receiver) =
-            execute_subscribe(plugin, query, params, component_id).await?;
+            execute_subscribe(plugin, parent, query, params, component_id).await?;
 
         let reader =
             accessor.with(|store| StreamReader::new(store, LiveEventProducer::new(receiver)))?;
@@ -352,6 +424,7 @@ impl<T: Send + 'static> bindings::seamlezz::surrealdb::call::HostWithStore<T> fo
 
     async fn cancel(
         accessor: &Accessor<T, Self>,
+        parent: Option<BindingTraceContext>,
         subscription_id: u64,
     ) -> wasmtime::Result<Result<(), String>> {
         let (subscriptions, component_id) = accessor.with(|mut view| {
@@ -360,6 +433,156 @@ impl<T: Send + 'static> bindings::seamlezz::surrealdb::call::HostWithStore<T> fo
             Ok::<_, wasmtime::Error>((Arc::clone(&plugin.subscription_manager), component_id))
         })?;
 
-        execute_cancel(subscriptions, component_id, subscription_id).await
+        execute_cancel(subscriptions, component_id, parent, subscription_id).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use opentelemetry::trace::{SpanId, TracerProvider as _};
+    use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider};
+    use tracing_opentelemetry::OpenTelemetryLayer;
+    use tracing_subscriber::layer::SubscriberExt as _;
+
+    use super::*;
+
+    fn context(trace_id: &str, span_id: &str) -> BindingTraceContext {
+        BindingTraceContext {
+            traceparent: format!("00-{trace_id}-{span_id}-01"),
+            tracestate: None,
+        }
+    }
+
+    fn test_dispatch() -> (tracing::Dispatch, InMemorySpanExporter, SdkTracerProvider) {
+        let exporter = InMemorySpanExporter::default();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .build();
+        let layer = OpenTelemetryLayer::new(provider.tracer("surrealdb-tests"));
+        let subscriber = tracing_subscriber::registry().with(layer);
+        (tracing::Dispatch::new(subscriber), exporter, provider)
+    }
+
+    #[test]
+    fn explicit_parent_context_policy_is_request_owned() {
+        let (dispatch, exporter, provider) = test_dispatch();
+        let first_parent = "1111111111111111";
+        let second_parent = "2222222222222222";
+
+        std::thread::scope(|scope| {
+            for parent in [first_parent, second_parent] {
+                let dispatch = dispatch.clone();
+                scope.spawn(move || {
+                    tracing::dispatcher::with_default(&dispatch, || {
+                        let span = tracing::info_span!(
+                            "surrealdb.test",
+                            otel.propagation.error = tracing::field::Empty,
+                            error = tracing::field::Empty,
+                            exception.slug = tracing::field::Empty,
+                            exception.message = tracing::field::Empty,
+                        );
+                        set_explicit_parent(
+                            &span,
+                            Some(context("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", parent)),
+                        );
+                    });
+                });
+            }
+        });
+
+        tracing::dispatcher::with_default(&dispatch, || {
+            let absent = tracing::info_span!("absent");
+            set_explicit_parent(&absent, None);
+
+            let malformed = tracing::info_span!(
+                "malformed",
+                otel.propagation.error = tracing::field::Empty,
+                error = tracing::field::Empty,
+                exception.slug = tracing::field::Empty,
+                exception.message = tracing::field::Empty,
+            );
+            set_explicit_parent(
+                &malformed,
+                Some(BindingTraceContext {
+                    traceparent: "not-w3c".into(),
+                    tracestate: None,
+                }),
+            );
+
+            let malformed_tracestate = tracing::info_span!(
+                "malformed-tracestate",
+                otel.propagation.error = tracing::field::Empty,
+                error = tracing::field::Empty,
+                exception.slug = tracing::field::Empty,
+                exception.message = tracing::field::Empty,
+            );
+            set_explicit_parent(
+                &malformed_tracestate,
+                Some(BindingTraceContext {
+                    traceparent: "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1111111111111111-01".into(),
+                    tracestate: Some("not valid".into()),
+                }),
+            );
+
+            let query_results = tracing::info_span!(
+                "query-results",
+                surrealdb.result.rows = tracing::field::Empty,
+                surrealdb.query.failed = tracing::field::Empty,
+                surrealdb.query.failure.count = tracing::field::Empty,
+                error = tracing::field::Empty,
+                exception.slug = tracing::field::Empty,
+                exception.message = tracing::field::Empty,
+            );
+            let _guard = query_results.enter();
+            record_query_result(&[Ok(vec![]), Err("sensitive database error".into())]);
+        });
+        provider.force_flush().expect("flush spans");
+
+        let spans = exporter.get_finished_spans().expect("finished spans");
+        for parent in [first_parent, second_parent] {
+            assert!(spans.iter().any(|span| {
+                span.name == "surrealdb.test"
+                    && span.parent_span_id == SpanId::from_hex(parent).unwrap()
+            }));
+        }
+
+        let absent = spans.iter().find(|span| span.name == "absent").unwrap();
+        assert_eq!(absent.parent_span_id, SpanId::INVALID);
+
+        let malformed = spans.iter().find(|span| span.name == "malformed").unwrap();
+        assert_eq!(malformed.parent_span_id, SpanId::INVALID);
+        assert!(malformed.attributes.iter().any(|attribute| {
+            attribute.key.as_str() == "exception.slug"
+                && attribute.value.as_str() == "capability-invalid-parent-context"
+        }));
+        assert!(malformed.attributes.iter().any(|attribute| {
+            attribute.key.as_str() == "otel.propagation.error"
+                && attribute.value == opentelemetry::Value::Bool(true)
+        }));
+
+        let malformed_tracestate = spans
+            .iter()
+            .find(|span| span.name == "malformed-tracestate")
+            .unwrap();
+        assert_eq!(malformed_tracestate.parent_span_id, SpanId::INVALID);
+        assert!(malformed_tracestate.attributes.iter().any(|attribute| {
+            attribute.key.as_str() == "exception.slug"
+                && attribute.value.as_str() == "capability-invalid-parent-context"
+        }));
+
+        let query_results = spans
+            .iter()
+            .find(|span| span.name == "query-results")
+            .unwrap();
+        assert!(query_results.attributes.iter().any(|attribute| {
+            attribute.key.as_str() == "exception.slug"
+                && attribute.value.as_str() == "surrealdb-query-results-failed"
+        }));
+        assert!(
+            !query_results
+                .attributes
+                .iter()
+                .any(|attribute| { attribute.value.as_str() == "sensitive database error" })
+        );
     }
 }

@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/plugins/surrealdb/", "crates/runtime/"]
 
 [workspace.package]
-version = "2.1.1"
+version = "2.1.2"
 edition = "2024"
 rust-version = "1.95.0"
 repository = "https://github.com/Seamlezz/wasmCloud-host"
@@ -27,6 +27,8 @@ async-trait = { version = "0.1", default-features = false }
 clap = { version = "4", features = ["derive", "env"] }
 futures-util = { version = "0.3", default-features = false }
 humantime = { version = "2" }
+opentelemetry = { version = "0.31", default-features = false, features = ["trace"] }
+opentelemetry_sdk = { version = "0.31", default-features = false, features = ["trace"] }
 surrealdb = {
   version = "3",
   default-features = false,
@@ -40,6 +42,7 @@ tracing = {
   default-features = false,
   features = ["attributes"]
 }
+tracing-opentelemetry = { version = "0.32", default-features = false }
 tracing-subscriber = {
   version = "0.3",
   default-features = false,
@@ -47,7 +50,7 @@ tracing-subscriber = {
 }
 wash-runtime = {
   git = "https://github.com/gabber235/wasmCloud",
-  rev = "e00f9968ba9214ae883cf69f4d8e874935a5e613",
+  rev = "a183df4d644697e43e3fff42a8b0a02b46da14b7",
   default-features = false,
   features = [
     "washlet",

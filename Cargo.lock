@@ -3435,6 +3435,8 @@ dependencies = [
  "percent-encoding",
  "rand 0.9.5",
  "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -3832,8 +3834,8 @@ version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03da047801ff44bb6a4d407d4860c05fd70bb81714e6b2f3812603d5b145b042"
 dependencies = [
- "heck 0.4.1",
- "itertools 0.11.0",
+ "heck 0.5.0",
+ "itertools 0.14.0",
  "log",
  "multimap",
  "petgraph",
@@ -3854,7 +3856,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.118",
@@ -6132,7 +6134,7 @@ dependencies = [
 [[package]]
 name = "wash-runtime"
 version = "2.5.3"
-source = "git+https://github.com/gabber235/wasmCloud?rev=e00f9968ba9214ae883cf69f4d8e874935a5e613#e00f9968ba9214ae883cf69f4d8e874935a5e613"
+source = "git+https://github.com/gabber235/wasmCloud?rev=a183df4d644697e43e3fff42a8b0a02b46da14b7#a183df4d644697e43e3fff42a8b0a02b46da14b7"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -6332,7 +6334,7 @@ dependencies = [
 
 [[package]]
 name = "wasmcloud-host-runtime"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -6347,16 +6349,20 @@ dependencies = [
 
 [[package]]
 name = "wasmcloud-plugin-surrealdb"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
  "futures-util",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "surrealdb",
  "surrealdb-host-adapter",
  "surrealdb-types",
  "tokio",
  "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
  "wash-runtime",
  "wasmtime",
 ]

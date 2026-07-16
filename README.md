@@ -1,6 +1,6 @@
 # wasmCloud Host
 
-Custom wasmCloud **washlet** binary with a SurrealDB host plugin (`seamlezz:surrealdb/call@0.2.0`). Runs cluster-connected workloads and exposes SurrealDB query + live subscribe to guest components.
+Custom wasmCloud **washlet** binary with a SurrealDB host plugin (`seamlezz:surrealdb/call@0.3.0`). Runs cluster-connected workloads and exposes SurrealDB query + live subscribe to guest components.
 
 ## Workspace
 
@@ -31,7 +31,7 @@ Same settings via env: `SCHEDULER_NATS_URL`, `DATA_NATS_URL`, `HOST_GROUP`. Full
 
 ## SurrealDB on workloads
 
-Add a `hostInterfaces` entry for `seamlezz:surrealdb/call@0.2.0` with:
+Add a `hostInterfaces` entry for `seamlezz:surrealdb/call@0.3.0` with:
 
 | Key | Required | Example |
 |-----|----------|---------|
@@ -130,7 +130,7 @@ Example:
 export OTEL_RESOURCE_ATTRIBUTES="wasmcloud.host.group=prod,wasmcloud.host.name=host-1,deployment.environment=prod"
 ```
 
-SurrealDB host calls emit spans with `db.system=surrealdb` and `db.operation` (`query`, `subscribe`, `cancel`). Query text and param values are not logged.
+SurrealDB host calls emit spans with `db.system.name=surrealdb` and `db.operation.name` (`query`, `subscribe`, `subscribe.stream`, `cancel`). Each call accepts an optional explicit W3C trace context; when supplied, the host uses it as the span parent. Callers may omit it when they do not need explicit propagation. Raw query text and parameter values are not recorded; spans include only query length and parameter count.
 
 See [docs/observability.md](docs/observability.md) for the full design.
 
@@ -193,7 +193,7 @@ Refresh vendored WIT after contract changes (`wkg.lock` and `wit/deps/` are comm
 
 ```bash
 cd crates/plugins/surrealdb
-wkg get seamlezz:surrealdb@0.2.0 --format wit -o wit/deps/seamlezz-surrealdb-0.2.0/package.wit
+wkg get seamlezz:surrealdb@0.3.0 --format wit -o wit/deps/seamlezz-surrealdb-0.3.0/package.wit
 ```
 
 ```bash

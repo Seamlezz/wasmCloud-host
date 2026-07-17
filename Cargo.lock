@@ -3834,8 +3834,8 @@ version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03da047801ff44bb6a4d407d4860c05fd70bb81714e6b2f3812603d5b145b042"
 dependencies = [
- "heck 0.4.1",
- "itertools 0.11.0",
+ "heck 0.5.0",
+ "itertools 0.14.0",
  "log",
  "multimap",
  "petgraph",
@@ -3856,7 +3856,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.118",
@@ -6134,7 +6134,7 @@ dependencies = [
 [[package]]
 name = "wash-runtime"
 version = "2.5.3"
-source = "git+https://github.com/gabber235/wasmCloud?rev=6e5c1a87429593ef83261362d65ae7554d323d2f#6e5c1a87429593ef83261362d65ae7554d323d2f"
+source = "git+https://github.com/gabber235/wasmCloud?rev=06c9cec5e118ebaf8e4654519a06e8b556f8de8f#06c9cec5e118ebaf8e4654519a06e8b556f8de8f"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -6334,7 +6334,7 @@ dependencies = [
 
 [[package]]
 name = "wasmcloud-host-runtime"
-version = "2.1.3"
+version = "2.1.4"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -6349,7 +6349,7 @@ dependencies = [
 
 [[package]]
 name = "wasmcloud-plugin-surrealdb"
-version = "2.1.3"
+version = "2.1.4"
 dependencies = [
  "anyhow",
  "async-trait",

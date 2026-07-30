@@ -50,7 +50,7 @@ tracing-subscriber = {
 }
 wash-runtime = {
   git = "https://github.com/gabber235/wasmCloud",
-  rev = "f97ee65e38624476355dcfc2a1d5ec8367044a22",
+  rev = "ac0677a26bb7ff2099b04b5dbc958cfbfa6f29c7",
   default-features = false,
   features = [
     "washlet",

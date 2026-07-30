@@ -12,7 +12,15 @@ name = "wasmcloud-host"
 path = "src/main.rs"
 
 [dependencies]
-wash-runtime = { workspace = true }
+wash-runtime = { workspace = true, features = [
+  "washlet",
+  "wasi-blobstore",
+  "wasi-config",
+  "wasi-keyvalue",
+  "wasi-logging",
+  "wasi-otel",
+  "wasm_component_model_implements",
+] }
 wasmcloud-plugin-surrealdb = { workspace = true }
 async-nats = { workspace = true }
 async-trait = { workspace = true }

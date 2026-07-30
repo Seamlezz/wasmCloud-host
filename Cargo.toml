@@ -52,15 +52,6 @@ wash-runtime = {
   git = "https://github.com/gabber235/wasmCloud",
   rev = "ac0677a26bb7ff2099b04b5dbc958cfbfa6f29c7",
   default-features = false,
-  features = [
-    "washlet",
-    "wasi-blobstore",
-    "wasi-config",
-    "wasi-keyvalue",
-    "wasi-logging",
-    "wasi-otel",
-    "wasm_component_model_implements",
-  ]
 }
 wasmcloud-plugin-surrealdb = { path = "crates/plugins/surrealdb" }
 wasmtime = {

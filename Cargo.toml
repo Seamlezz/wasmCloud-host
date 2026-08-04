@@ -12,7 +12,7 @@ license = "Unlicense"
 [workspace.dependencies]
 anyhow = { version = "1", default-features = false }
 async-nats = {
-  version = "0.47",
+  version = "0.49.1",
   default-features = false,
   features = [
     "aws-lc-rs",
@@ -50,26 +50,15 @@ tracing-subscriber = {
 }
 wash-runtime = {
   git = "https://github.com/gabber235/wasmCloud",
-  rev = "ac0677a26bb7ff2099b04b5dbc958cfbfa6f29c7",
+  rev = "b8e390e24fccbcbf191749121d1f83ae12e432c7",
   default-features = false,
 }
 wasmcloud-plugin-surrealdb = { path = "crates/plugins/surrealdb" }
 wasmtime = {
-  git = "https://github.com/bytecodealliance/wasmtime",
-  rev = "7535c0255b2b84f6ae4de6034649ba2eeda84173",
+  version = "47.0.3",
   default-features = false,
   features = [
     "component-model",
     "component-model-async",
   ]
 }
-
-# The wasm_component_model_implements feature requires the resource-implements
-# wasmtime feature (bytecodealliance/wasmtime#13666). It merged to main (47.0.0)
-# but is not on the 46 release branch. The fork backports it onto 46.
-# Retire this patch when moving to wasmtime 47.
-[patch."https://github.com/bytecodealliance/wasmtime"]
-wasmtime = { git = "https://github.com/ricochet/wasmtime", branch = "release-46.0.0-implements" }
-wasmtime-wasi = { git = "https://github.com/ricochet/wasmtime", branch = "release-46.0.0-implements" }
-wasmtime-wasi-io = { git = "https://github.com/ricochet/wasmtime", branch = "release-46.0.0-implements" }
-wasmtime-wasi-http = { git = "https://github.com/ricochet/wasmtime", branch = "release-46.0.0-implements" }

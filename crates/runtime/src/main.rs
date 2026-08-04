@@ -7,7 +7,7 @@ use wash_runtime::{
     engine::{Engine, WasmProposal},
     host::{
         HostConfig,
-        http::{DynamicRouter, HttpServer, TlsConfig},
+        http::{DynamicRouter, Ingress, TlsConfig},
     },
     observability::{self, Meters},
     plugin::{
@@ -280,11 +280,11 @@ async fn main() -> anyhow::Result<()> {
     let http = match (&args.tls_cert_path, &args.tls_key_path) {
         (Some(cert_path), Some(key_path)) => {
             let tls_config = TlsConfig::new(cert_path, key_path);
-            HttpServer::new_with_tls(DynamicRouter::default(), args.http_addr, tls_config)
+            Ingress::new_with_tls(DynamicRouter::default(), args.http_addr, tls_config)
                 .await
                 .context("failed to start HTTPS server")?
         }
-        _ => HttpServer::new(DynamicRouter::default(), args.http_addr)
+        _ => Ingress::new(DynamicRouter::default(), args.http_addr)
             .await
             .context("failed to start HTTP server")?,
     };

@@ -5315,9 +5315,8 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-host-adapter"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0550294cc6d870352600b0818d3468a18d5745da8b14b306c01590bedbb41a23"
+version = "0.8.0"
+source = "git+https://github.com/Seamlezz/surrealdb-wasi-component?rev=cb3083c#cb3083cba338bc485f3491ef9acb233be92b22fb"
 dependencies = [
  "anyhow",
  "rust_decimal",

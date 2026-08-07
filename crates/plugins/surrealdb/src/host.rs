@@ -11,7 +11,9 @@ use tracing::{Instrument, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use wasmtime::component::{Accessor, StreamReader};
 
-use surrealdb_host_adapter::{QueryError, SubscribeError, SubscriptionTask};
+use surrealdb_host_adapter::{
+    QueryError, StatementError as AdapterStatementError, SubscribeError, SubscriptionTask,
+};
 use wash_runtime::engine::ctx::{ActiveCtx, SharedCtx};
 
 use super::WasmcloudSurrealdb;
@@ -21,6 +23,8 @@ use super::streams::{LiveEventProducer, to_binding_live_event};
 use super::{PLUGIN_SURREALDB_ID, bindings};
 
 type BindingLiveEvent = bindings::seamlezz::surrealdb::call::LiveEvent;
+type BindingQueryFailure = bindings::seamlezz::surrealdb::call::QueryFailure;
+type BindingStatementError = bindings::seamlezz::surrealdb::call::StatementError;
 type BindingTraceContext = bindings::wasmcloud::observability::propagation::TraceContext;
 
 impl Extractor for BindingTraceContext {
@@ -80,7 +84,7 @@ fn record_connection_key(key: &ConnectionKey) {
     observability::record_connection_key(&Span::current(), key);
 }
 
-fn record_query_result(rows: &[Result<Vec<u8>, String>]) {
+fn record_query_result(rows: &[Result<Vec<u8>, BindingStatementError>]) {
     let span = Span::current();
     let failure_count = rows.iter().filter(|row| row.is_err()).count();
     span.record("surrealdb.result.rows", rows.len());
@@ -92,6 +96,17 @@ fn record_query_result(rows: &[Result<Vec<u8>, String>]) {
             "surrealdb-query-results-failed",
             "one or more SurrealDB query results failed",
         );
+    }
+}
+
+fn to_binding_statement_error(error: AdapterStatementError) -> BindingStatementError {
+    match error {
+        AdapterStatementError::Domain(message) => BindingStatementError::Domain(message),
+        AdapterStatementError::RetryableConflict(message) => {
+            BindingStatementError::RetryableConflict(message)
+        }
+        AdapterStatementError::NotExecuted(message) => BindingStatementError::NotExecuted(message),
+        AdapterStatementError::Failure(message) => BindingStatementError::Failure(message),
     }
 }
 
@@ -110,14 +125,24 @@ async fn resolve_db(
     Ok((key, db))
 }
 
-fn map_resolve_error(error: anyhow::Error) -> wasmtime::Error {
+fn record_resolve_error(error: &anyhow::Error) -> String {
     let message = error.to_string();
     if message.contains("not bound") {
         record_span_error("surrealdb-component-not-bound", &message);
     } else {
         record_span_error("surrealdb-connection-failed", &message);
     }
-    wasmtime::Error::msg(message)
+    message
+}
+
+fn map_resolve_error(error: anyhow::Error) -> wasmtime::Error {
+    wasmtime::Error::msg(record_resolve_error(&error))
+}
+
+fn map_query_resolve_error(error: anyhow::Error) -> BindingQueryFailure {
+    BindingQueryFailure {
+        message: record_resolve_error(&error),
+    }
 }
 
 fn plugin_and_component_id(
@@ -129,18 +154,19 @@ fn plugin_and_component_id(
     Ok((plugin, ctx.component_id.to_string()))
 }
 
-fn map_query_error(error: QueryError) -> wasmtime::Error {
-    match error {
+fn map_query_error(error: QueryError) -> BindingQueryFailure {
+    let message = match error {
         QueryError::ParamDecode { key, source } => {
             let message = format!("param decode {key}: {source}");
             record_span_error("surrealdb-param-decode", "query parameter decoding failed");
-            wasmtime::Error::msg(message)
+            message
         }
         QueryError::QueryExecution(source) => {
             record_span_error("surrealdb-query-failed", "query execution failed");
-            wasmtime::Error::new(source)
+            source.to_string()
         }
-    }
+    };
+    BindingQueryFailure { message }
 }
 
 fn map_subscribe_error(error: SubscribeError) -> wasmtime::Error {
@@ -197,24 +223,30 @@ async fn execute_query(
     parent: Option<BindingTraceContext>,
     query: String,
     params: Vec<(String, Vec<u8>)>,
-) -> wasmtime::Result<Vec<Result<Vec<u8>, String>>> {
+) -> wasmtime::Result<Result<Vec<Result<Vec<u8>, BindingStatementError>>, BindingQueryFailure>> {
     let span = query_span(&component_id, query.len(), params.len());
     set_explicit_parent(&span, parent);
 
     async move {
-        let (key, db) = resolve_db(plugin, &component_id)
-            .await
-            .map_err(map_resolve_error)?;
+        let (key, db) = match resolve_db(plugin, &component_id).await {
+            Ok(resolved) => resolved,
+            Err(error) => return Ok(Err(map_query_resolve_error(error))),
+        };
         record_connection_key(&key);
 
         let guard = db.read().await;
         let result = surrealdb_host_adapter::query(&guard, query, params)
             .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|row| row.map_err(to_binding_statement_error))
+                    .collect::<Vec<_>>()
+            })
             .map_err(map_query_error);
         if let Ok(rows) = &result {
             record_query_result(rows);
         }
-        result
+        Ok(result)
     }
     .instrument(span)
     .await
@@ -415,7 +447,8 @@ impl<T: Send + 'static> bindings::seamlezz::surrealdb::call::HostWithStore<T> fo
         parent: Option<BindingTraceContext>,
         query: String,
         params: Vec<(String, Vec<u8>)>,
-    ) -> wasmtime::Result<Vec<Result<Vec<u8>, String>>> {
+    ) -> wasmtime::Result<Result<Vec<Result<Vec<u8>, BindingStatementError>>, BindingQueryFailure>>
+    {
         let (plugin, component_id) = accessor.with(|mut view| {
             plugin_and_component_id(&view.get()).map_err(|e| wasmtime::Error::msg(e.to_string()))
         })?;
@@ -481,6 +514,30 @@ mod tests {
         let layer = OpenTelemetryLayer::new(provider.tracer("surrealdb-tests"));
         let subscriber = tracing_subscriber::registry().with(layer);
         (tracing::Dispatch::new(subscriber), exporter, provider)
+    }
+
+    #[test]
+    fn preserves_all_statement_error_categories() {
+        assert!(matches!(
+            to_binding_statement_error(AdapterStatementError::Domain("domain".into())),
+            BindingStatementError::Domain(message) if message == "domain"
+        ));
+        assert!(matches!(
+            to_binding_statement_error(AdapterStatementError::RetryableConflict(
+                "conflict".into()
+            )),
+            BindingStatementError::RetryableConflict(message) if message == "conflict"
+        ));
+        assert!(matches!(
+            to_binding_statement_error(AdapterStatementError::NotExecuted(
+                "not executed".into()
+            )),
+            BindingStatementError::NotExecuted(message) if message == "not executed"
+        ));
+        assert!(matches!(
+            to_binding_statement_error(AdapterStatementError::Failure("failure".into())),
+            BindingStatementError::Failure(message) if message == "failure"
+        ));
     }
 
     #[test]
@@ -573,7 +630,12 @@ mod tests {
                 exception.message = tracing::field::Empty,
             );
             let _guard = query_results.enter();
-            record_query_result(&[Ok(vec![]), Err("sensitive database error".into())]);
+            record_query_result(&[
+                Ok(vec![]),
+                Err(BindingStatementError::Failure(
+                    "sensitive database error".into(),
+                )),
+            ]);
         });
         provider.force_flush().expect("flush spans");
 

@@ -50,7 +50,7 @@ tracing-subscriber = {
 }
 wash-runtime = {
   git = "https://github.com/gabber235/wasmCloud",
-  rev = "9f43d83c0",
+  rev = "76dc551a3",
   default-features = false,
 }
 wasmcloud-plugin-surrealdb = { path = "crates/plugins/surrealdb" }

@@ -6425,7 +6425,7 @@ dependencies = [
 
 [[package]]
 name = "wasmcloud-host-runtime"
-version = "2.1.7"
+version = "2.1.8"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -6440,7 +6440,7 @@ dependencies = [
 
 [[package]]
 name = "wasmcloud-plugin-surrealdb"
-version = "2.1.7"
+version = "2.1.8"
 dependencies = [
  "anyhow",
  "async-trait",

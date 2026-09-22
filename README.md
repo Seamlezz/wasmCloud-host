@@ -1,19 +1,19 @@
 # wasmCloud Host
 
-Custom wasmCloud **washlet** binary with a SurrealDB host plugin (`seamlezz:surrealdb/call@0.3.0`). Runs cluster-connected workloads and exposes SurrealDB query + live subscribe to guest components.
+Custom wasmCloud **washlet** binary with a SurrealDB host plugin (`seamlezz:surrealdb/call@0.4.0`). Runs cluster-connected workloads and exposes SurrealDB query + live subscribe to guest components.
 
 ## Workspace
 
 | Crate | Binary / lib | Purpose |
 |-------|----------------|---------|
-| `wasmcloud-host-runtime` | `wasmcloud-host` | NATS-connected cluster host (`ClusterHostBuilder`) |
+| `wasmcloud-host-runtime` | `wasmcloud-host` | NATS-connected cluster host (upstream `HostCommand`) |
 | `wasmcloud-plugin-surrealdb` | — | `HostPlugin` for SurrealDB |
 
 Guest components: [`surrealdb-component-sdk`](https://github.com/Seamlezz/surrealdb-wasi-component).
 
 ## Prerequisites
 
-- Rust **1.91+** (see `rust-version` in root `Cargo.toml`)
+- Rust **1.95+** (see `rust-version` in root `Cargo.toml`)
 - [NATS](https://nats.io/) reachable from the host
 - wasmCloud operator or compatible scheduler on the same NATS cluster
 
@@ -27,11 +27,11 @@ cargo build --release -p wasmcloud-host-runtime
   --host-group=default
 ```
 
-Same settings via env: `SCHEDULER_NATS_URL`, `DATA_NATS_URL`, `HOST_GROUP`. Full flags: `wasmcloud-host host --help`.
+The binary delegates host lifecycle, resource limits, probes, startup retries, and graceful shutdown to wasmCloud 2.9.0. The SurrealDB plugin is registered before host configuration is validated. Full flags: `wasmcloud-host host --help`.
 
 ## SurrealDB on workloads
 
-Add a `hostInterfaces` entry for `seamlezz:surrealdb/call@0.3.0` with:
+Add a `hostInterfaces` entry for `seamlezz:surrealdb/call@0.4.0` with:
 
 | Key | Required | Example |
 |-----|----------|---------|
@@ -43,45 +43,15 @@ Add a `hostInterfaces` entry for `seamlezz:surrealdb/call@0.3.0` with:
 
 ## Configuration
 
-All host flags require the `host` subcommand: `wasmcloud-host host [flags]`. Global flags (`--log-level`, `--verbose`, `--otel-debug`) go before the subcommand.
+Host flags require the `host` subcommand: `wasmcloud-host host [flags]`. Global flags include `--log-level`, `--verbose`, `--otel-debug`, `--meters`, and `--user-config`.
 
-| Flag | Env | Default |
-|------|-----|---------|
-| `--host-group` | `HOST_GROUP` | `default` |
-| `--scheduler-nats-url` | `SCHEDULER_NATS_URL` | `nats://127.0.0.1:4222` |
-| `--data-nats-url` | `DATA_NATS_URL` | `nats://127.0.0.1:4222` |
-| `--http-addr` | `HTTP_ADDR` | `0.0.0.0:8080` |
-| `--host-name` | `HOST_NAME` | — |
-| `--environment` | `WASMCLOUD_HOST_ENVIRONMENT` | — |
-| `--log-level` / `-l` | — | `info` |
-| `--verbose` / `-v` | — | `false` |
-| `--otel-debug` | `WASMCLOUD_OTEL_DEBUG` | `false` |
-| `--enable-fuel-meters` | `WASMCLOUD_ENABLE_FUEL_METERS` | `false` |
-| `--oci-cache-dir` | `OCI_CACHE_DIR` | — |
-| `--allow-insecure-registries` | `ALLOW_INSECURE_REGISTRIES` | `false` |
-| `--registry-pull-timeout` | `REGISTRY_PULL_TIMEOUT` | `30s` |
+Use `--user-config /path/to/wash.toml` for host controlled plugin bindings. The operator chart supplies this file. Native messaging uses `wasmcloud:nats@0.1.0`, including Core NATS and JetStream. Workload interfaces declare `core-subscriptions`; host bindings own credentials and subject grants.
 
-### NATS TLS (per-connection)
+Scheduler and data connections accept `--scheduler-nats-creds` and `--data-nats-creds`, or `SCHEDULER_NATS_CREDENTIALS` and `DATA_NATS_CREDENTIALS`. The native NATS plugin independently receives its credential path through its host binding `creds` setting. TLS flags follow upstream `wash host --help`.
 
-| Flag | Env |
-|------|-----|
-| `--scheduler-nats-tls-ca` | `SCHEDULER_NATS_TLS_CA` |
-| `--scheduler-nats-tls-cert` | `SCHEDULER_NATS_TLS_CERT` |
-| `--scheduler-nats-tls-key` | `SCHEDULER_NATS_TLS_KEY` |
-| `--data-nats-tls-ca` | `DATA_NATS_TLS_CA` |
-| `--data-nats-tls-cert` | `DATA_NATS_TLS_CERT` |
-| `--data-nats-tls-key` | `DATA_NATS_TLS_KEY` |
-| `--scheduler-nats-creds` | `SCHEDULER_NATS_CREDENTIALS` |
-| `--data-nats-creds` | `DATA_NATS_CREDENTIALS` |
+Auth callout uses the ordinary host subject grant `$SYS.REQ.USER.AUTH`. The fork removes the special `$SYS` prohibition. No custom identity selector or binding is required. Set `workloadConfig = "deny"` so workloads cannot replace host credentials or widen subject grants.
 
-### HTTP TLS
-
-| Flag | Env |
-|------|-----|
-| `--tls-cert-path` | `TLS_CERT_PATH` |
-| `--tls-key-path` | `TLS_KEY_PATH` |
-
-When both are set, the HTTP server serves HTTPS instead of plain HTTP.
+Use `--meters duration` (default), `--meters fuel`, or `--meters off` instead of the removed `--enable-fuel-meters` flag. Run `wasmcloud-host --help` for the accepted value syntax.
 
 ## Observability
 
@@ -101,7 +71,7 @@ export RUST_LOG=info,wasmcloud_plugin_surrealdb=debug
 ./target/release/wasmcloud-host host --host-group=dev
 ```
 
-Open http://localhost:16686 to inspect traces. Guest workload telemetry (via `wasi:otel`) exports separately with `service.name=wasi-otel`.
+Open http://localhost:16686 to inspect traces. Guest telemetry through `wasi:otel` preserves component span identifiers and timestamps. By default, each component supplies `service.name`, with workload namespace and identity attached as resource attributes.
 
 ### Environment variables
 
@@ -113,15 +83,14 @@ Open http://localhost:16686 to inspect traces. Guest workload telemetry (via `wa
 | `OTEL_RESOURCE_ATTRIBUTES` | Extra resource attributes (comma-separated `key=value`) |
 | `OTEL_TRACES_SAMPLER` | Trace sampling policy |
 | `WASMCLOUD_OTEL_DEBUG` | Sets host observability logging to debug and enables verbose runtime targets |
-| `WASMCLOUD_ENABLE_FUEL_METERS` | Enables Wasmtime fuel consumption and exports `fuel.consumption` host metric |
 | `RUST_LOG` | Log filter (overrides `--log-level` when set) |
 
 Map host identity into resource attributes:
 
 | Host flag / env | Suggested OTEL attribute |
 |-----------------|--------------------------|
-| `--host-group` / `HOST_GROUP` | `wasmcloud.host.group` |
-| `--host-name` / `HOST_NAME` | `wasmcloud.host.name` |
+| `--host-group` | `wasmcloud.host.group` |
+| `--host-name` | `wasmcloud.host.name` |
 | `--environment` / `WASMCLOUD_HOST_ENVIRONMENT` | `deployment.environment` |
 
 Example:
@@ -193,11 +162,11 @@ Refresh vendored WIT after contract changes (`wkg.lock` and `wit/deps/` are comm
 
 ```bash
 cd crates/plugins/surrealdb
-wkg get seamlezz:surrealdb@0.3.0 --format wit -o wit/deps/seamlezz-surrealdb-0.3.0/package.wit
+wkg get seamlezz:surrealdb@0.4.0 --format wit -o wit/deps/seamlezz-surrealdb-0.4.0/package.wit
 ```
 
 ```bash
-cargo test --workspace
+dagger check
 ```
 
 ## License

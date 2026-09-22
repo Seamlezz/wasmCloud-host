@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/plugins/surrealdb/", "crates/runtime/"]
 
 [workspace.package]
-version = "2.2.0"
+version = "2.2.1"
 edition = "2024"
 rust-version = "1.95.0"
 repository = "https://github.com/Seamlezz/wasmCloud-host"
@@ -37,10 +37,10 @@ tracing-subscriber = {
 }
 wash-runtime = {
   git = "https://github.com/gabber235/wasmCloud",
-  rev = "6f391cce7441439ec788c6d9e13e7e26e2ba3bcd",
+  rev = "e6ed77a89fb37872420e48097c43b37bc38bdc2f",
   default-features = false,
 }
-wash = { git = "https://github.com/gabber235/wasmCloud", rev = "6f391cce7441439ec788c6d9e13e7e26e2ba3bcd", default-features = false, features = ["wasm_component_model_implements"] }
+wash = { git = "https://github.com/gabber235/wasmCloud", rev = "e6ed77a89fb37872420e48097c43b37bc38bdc2f", default-features = false, features = ["wasm_component_model_implements"] }
 wasmcloud-plugin-surrealdb = { path = "crates/plugins/surrealdb" }
 wasmtime = {
   version = "47.0.3",

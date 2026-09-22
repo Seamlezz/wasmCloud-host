@@ -6986,7 +6986,7 @@ dependencies = [
 [[package]]
 name = "wash"
 version = "2.9.0"
-source = "git+https://github.com/gabber235/wasmCloud?rev=6f391cce7441439ec788c6d9e13e7e26e2ba3bcd#6f391cce7441439ec788c6d9e13e7e26e2ba3bcd"
+source = "git+https://github.com/gabber235/wasmCloud?rev=e6ed77a89fb37872420e48097c43b37bc38bdc2f#e6ed77a89fb37872420e48097c43b37bc38bdc2f"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -7026,7 +7026,7 @@ dependencies = [
 [[package]]
 name = "wash-runtime"
 version = "2.9.0"
-source = "git+https://github.com/gabber235/wasmCloud?rev=6f391cce7441439ec788c6d9e13e7e26e2ba3bcd#6f391cce7441439ec788c6d9e13e7e26e2ba3bcd"
+source = "git+https://github.com/gabber235/wasmCloud?rev=e6ed77a89fb37872420e48097c43b37bc38bdc2f#e6ed77a89fb37872420e48097c43b37bc38bdc2f"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -7367,7 +7367,7 @@ dependencies = [
 
 [[package]]
 name = "wasmcloud-host-runtime"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -7380,7 +7380,7 @@ dependencies = [
 
 [[package]]
 name = "wasmcloud-plugin-surrealdb"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "anyhow",
  "async-trait",

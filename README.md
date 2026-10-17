@@ -27,7 +27,7 @@ cargo build --release -p wasmcloud-host-runtime
   --host-group=default
 ```
 
-The binary delegates host lifecycle, resource limits, probes, startup retries, and graceful shutdown to wasmCloud 2.9.0. The SurrealDB plugin is registered before host configuration is validated. Full flags: `wasmcloud-host host --help`.
+The binary delegates host lifecycle, resource limits, probes, startup retries, and graceful shutdown to wasmCloud 2.10.3. The SurrealDB plugin is registered before host configuration is validated. Full flags: `wasmcloud-host host --help`.
 
 ## SurrealDB on workloads
 
@@ -55,7 +55,7 @@ Use `--meters duration` (default), `--meters fuel`, or `--meters off` instead of
 
 ## Observability
 
-The host exports traces, logs, and metrics via OTLP (gRPC) when any `OTEL_*` environment variable is set. Without `OTEL_*`, logs go to stderr only (`RUST_LOG` filters apply).
+The host enables OTLP export separately for traces, logs, and metrics when a collector endpoint is configured for that signal. Without collector endpoints, logs go to stderr (`RUST_LOG` filters apply). `OTEL_EXPORTER_OTLP_PROTOCOL` and the corresponding signal specific protocol variables select gRPC or HTTP export. Component trace propagation remains available when trace export is disabled.
 
 ### Local Jaeger
 

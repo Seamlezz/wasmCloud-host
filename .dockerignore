@@ -1,0 +1,9 @@
+.git
+.github
+.devenv
+.devenv.flake.nix
+devenv.*
+docs
+target
+Dockerfile
+.dockerignore

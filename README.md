@@ -114,46 +114,29 @@ CI (`.github/workflows/publish-runtime.yml`) builds and publishes each platform 
 Read the current runtime version:
 
 ```bash
-dagger call runtime-version
+devenv shell -- runtime-version
 ```
 
-Check whether CI would publish (requires `packages: read` token):
+Log in to GHCR (needs `GHCR_USERNAME` and `GHCR_TOKEN`), then check whether CI would publish:
 
 ```bash
-dagger call needs-publish \
-  --registry=ghcr.io \
-  --image=seamlezz/wasmcloud-host \
-  --username=YOUR_GH_USER \
-  --password=env://GITHUB_TOKEN
+devenv shell -- ghcr-login
+devenv shell -- needs-publish
 ```
 
-Publish one platform (same as a CI matrix leg):
+Publish one platform (same as a CI matrix leg), then combine the published platforms into the version and `latest` tags:
 
 ```bash
-dagger call publish-platform \
-  --platform=linux/amd64 \
-  --registry=ghcr.io \
-  --image=seamlezz/wasmcloud-host \
-  --username=YOUR_GH_USER \
-  --password=env://GITHUB_TOKEN
-```
-
-Publish multi-arch locally (builds both platforms in one graph):
-
-```bash
-dagger call publish \
-  --registry=ghcr.io \
-  --image=seamlezz/wasmcloud-host \
-  --tag=0.1.0 \
-  --username=YOUR_GH_USER \
-  --password=env://GITHUB_TOKEN \
-  --include-latest=true
+devenv shell -- publish-platform linux/amd64
+devenv shell -- publish-platform linux/arm64
+devenv shell -- publish-manifest
 ```
 
 Build a single-platform image and inspect it:
 
 ```bash
-dagger call build --platform=linux/amd64 with-exec --args=/usr/local/bin/wasmcloud-host,host,--help stdout
+devenv shell -- build-image linux/amd64
+docker run --rm --platform linux/amd64 wasmcloud-host:dev host --help
 ```
 
 ## Development
@@ -165,8 +148,15 @@ cd crates/plugins/surrealdb
 wkg get seamlezz:surrealdb@0.4.0 --format wit -o wit/deps/seamlezz-surrealdb-0.4.0/package.wit
 ```
 
+[devenv](https://devenv.sh) provides the toolchain and protoc. CI runs the same commands.
+
 ```bash
-dagger check
+devenv shell -- check          # format check, clippy and tests
+devenv shell -- tests
+devenv shell -- lint
+devenv shell -- build
+devenv shell -- format
+devenv shell -- format-check
 ```
 
 ## License

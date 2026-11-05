@@ -1,1 +1,1 @@
-After being done with implementing run `dagger check`.
+After being done with implementing run `devenv shell -- check`.

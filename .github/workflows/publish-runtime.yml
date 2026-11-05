@@ -16,46 +16,30 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v6
-      - name: Dagger check
-        uses: memospot/action-dagger@v1
-        with:
-          version: "latest"
-          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
-          args: >-
-            check
+      - uses: ./.github/actions/devenv
+      - run: devenv shell -- check
 
   needs-publish:
     runs-on: ubuntu-latest
     outputs:
-      needs-publish: ${{ steps.set-output.outputs.needs-publish }}
+      needs-publish: ${{ steps.gate.outputs.needs-publish }}
     permissions:
       contents: read
       packages: read
+    env:
+      GHCR_USERNAME: ${{ github.actor }}
+      GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/devenv
+      - run: devenv shell -- ghcr-login
       - id: gate
-        uses: memospot/action-dagger@v1
-        with:
-          version: "latest"
-          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
-          dagger-flags: "-s"
-          args: >-
-            needs-publish
-            --registry=ghcr.io
-            --image=seamlezz/wasmcloud-host
-            --username=${{ github.actor }}
-            --password=env:GITHUB_TOKEN
-            --force=${{ github.event_name == 'workflow_dispatch' }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - id: set-output
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && '--force' || '' }}
         run: |
-          v="$(echo "${{ steps.gate.outputs.output }}" | tr -d '[:space:]')"
-          if [ "$v" = "true" ]; then
-            echo "needs-publish=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "needs-publish=false" >> "$GITHUB_OUTPUT"
-          fi
+          set -euo pipefail
+          result="$(devenv shell -- needs-publish $FORCE | tail -n 1)"
+          echo "needs-publish=$result" >> "$GITHUB_OUTPUT"
 
   publish-platform:
     needs: [check, needs-publish]
@@ -71,23 +55,14 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      GHCR_USERNAME: ${{ github.actor }}
+      GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v6
-      - name: Dagger publish platform
-        uses: memospot/action-dagger@v1
-        with:
-          version: "latest"
-          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
-          cache-key: wasmcloud-host-${{ matrix.platform }}-${{ github.run_id }}
-          args: >-
-            publish-platform
-            --platform=${{ matrix.platform }}
-            --registry=ghcr.io
-            --image=seamlezz/wasmcloud-host
-            --username=${{ github.actor }}
-            --password=env:GITHUB_TOKEN
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: ./.github/actions/devenv
+      - run: devenv shell -- ghcr-login
+      - run: devenv shell -- publish-platform "${{ matrix.platform }}"
 
   manifest:
     needs: [publish-platform]
@@ -95,32 +70,11 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      GHCR_USERNAME: ${{ github.actor }}
+      GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v6
-
-      - id: version
-        uses: memospot/action-dagger@v1
-        with:
-          version: "latest"
-          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
-          dagger-flags: "-s"
-          args: runtime-version
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create multi-arch manifest
-        env:
-          IMAGE: ghcr.io/seamlezz/wasmcloud-host
-          VERSION: ${{ steps.version.outputs.output }}
-        run: |
-          set -euo pipefail
-          VERSION="$(echo "$VERSION" | tr -d '[:space:]')"
-          docker buildx imagetools create \
-            -t "${IMAGE}:${VERSION}" \
-            -t "${IMAGE}:latest" \
-            "${IMAGE}:${VERSION}-amd64" \
-            "${IMAGE}:${VERSION}-arm64"
+      - uses: ./.github/actions/devenv
+      - run: devenv shell -- ghcr-login
+      - run: devenv shell -- publish-manifest

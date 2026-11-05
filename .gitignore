@@ -25,3 +25,8 @@ target
 
 docs/
 .DS_Store
+
+# devenv
+.devenv/
+.devenv.flake.nix
+devenv.lock.bak

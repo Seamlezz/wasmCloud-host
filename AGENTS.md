@@ -1,1 +1,1 @@
-After being done with implementing run `devenv shell -- check`.
+After being done with implementing run `check` (prefix `devenv shell --` when `DEVENV_ROOT` is unset).

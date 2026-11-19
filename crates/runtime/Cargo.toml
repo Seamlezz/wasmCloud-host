@@ -16,6 +16,5 @@ wash.workspace = true
 wash-runtime.workspace = true
 wasmcloud-plugin-surrealdb = { workspace = true }
 anyhow = { workspace = true }
-tokio = { workspace = true }
 tracing = { workspace = true }
 clap = { workspace = true }

@@ -44,6 +44,18 @@ Add a `hostInterfaces` entry for `seamlezz:surrealdb/call@0.4.0` with:
 
 Any key may come from a plugin backed `secrets:` entry instead of plain text. A secret `url` is never logged.
 
+The plugin runs SurrealDB 4. `LIVE SELECT` on a table that is not defined fails, and a failed subscribe traps the guest call, so define a table before subscribing to it.
+
+### Embedding the plugin
+
+The SurrealDB host adapter runs every query and live query on a tokio task of its own, and SurrealDB needs 10 MiB worker stacks; a debug build overflows tokio's default 2 MiB on `DEFINE TABLE`. The binary builds its runtime with `wasmcloud_plugin_surrealdb::runtime_builder()`. A process that embeds the plugin, such as a component test host, builds its runtime the same way:
+
+```rust
+wasmcloud_plugin_surrealdb::runtime_builder()
+    .build()?
+    .block_on(run())
+```
+
 ## Configuration
 
 Host flags require the `host` subcommand: `wasmcloud-host host [flags]`. Global flags include `--log-level`, `--verbose`, `--otel-debug`, `--meters`, and `--user-config`.

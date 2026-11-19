@@ -1,8 +1,14 @@
 #![allow(clippy::unwrap_used)]
 
+use std::future::Future;
+use std::time::Duration;
+
 use anyhow::Context as _;
-use surrealdb_host_adapter::{query, subscribe};
-use wasmcloud_plugin_surrealdb::{ConnectionKey, WasmcloudSurrealdb};
+use futures_util::StreamExt;
+use surrealdb_host_adapter::{
+    LiveAction, SubscribeError, notification_to_live_event, query, subscribe,
+};
+use wasmcloud_plugin_surrealdb::{ConnectionKey, WasmcloudSurrealdb, runtime_builder};
 
 fn memory_connection_key() -> ConnectionKey {
     ConnectionKey::from_config(&wash_runtime::wit::Config::from([
@@ -13,73 +19,134 @@ fn memory_connection_key() -> ConnectionKey {
     .expect("valid memory config")
 }
 
-#[tokio::test]
-async fn plugin_memory_query() {
-    let plugin = WasmcloudSurrealdb::new();
-    let key = memory_connection_key();
-    let db = plugin
-        .get_or_create_connection(&key)
-        .await
-        .context("failed to connect in-memory SurrealDB")
-        .unwrap();
-
-    let guard = db.read().await;
-
-    query(
-        &guard,
-        "DEFINE TABLE person SCHEMALESS".to_string(),
-        Vec::new(),
-    )
-    .await
-    .context("define table")
-    .unwrap();
-
-    query(
-        &guard,
-        "CREATE person:demo CONTENT { name: 'demo', age: 42 }".to_string(),
-        Vec::new(),
-    )
-    .await
-    .context("create person")
-    .unwrap();
-
-    let results = query(&guard, "SELECT * FROM person".to_string(), Vec::new())
-        .await
-        .context("select person")
-        .unwrap();
-
-    let ok_rows = results.iter().filter(|r| r.is_ok()).count();
-    assert!(ok_rows > 0, "expected at least one ok result row");
+/// Runs `test` on the runtime the host binary uses, so SurrealDB executes on
+/// the worker threads a production host gives it.
+fn on_host_runtime<F: Future<Output = ()>>(test: F) {
+    runtime_builder()
+        .build()
+        .expect("host runtime")
+        .block_on(test);
 }
 
-#[tokio::test]
-async fn plugin_subscribe_stream_lifecycle() {
-    use std::time::Duration;
+#[test]
+fn host_runtime_runs_schema_definitions() {
+    on_host_runtime(async {
+        let plugin = WasmcloudSurrealdb::new();
+        let db = plugin
+            .get_or_create_connection(&memory_connection_key())
+            .await
+            .unwrap();
+        let guard = db.read().await;
 
-    use futures_util::StreamExt;
-
-    let plugin = WasmcloudSurrealdb::new();
-    let key = memory_connection_key();
-    let db = plugin
-        .get_or_create_connection(&key)
-        .await
-        .context("failed to connect")
-        .unwrap();
-
-    let guard = db.read().await;
-    query(&guard, "DEFINE TABLE person SCHEMALESS".into(), vec![])
+        let results = query(
+            &guard,
+            "DEFINE TABLE person SCHEMALESS".to_string(),
+            Vec::new(),
+        )
         .await
         .context("define table")
         .unwrap();
 
-    let stream = subscribe(&guard, "LIVE SELECT * FROM person".into(), vec![])
-        .await
-        .context("subscribe")
-        .unwrap();
-    let mut stream = Box::pin(stream);
+        assert!(results.iter().all(Result::is_ok), "{results:?}");
+    });
+}
 
-    let first = tokio::time::timeout(Duration::from_secs(3), stream.next()).await;
-    if let Ok(Some(Err(e))) = first {
-        panic!("subscribe stream error: {e:?}");
-    }
+#[test]
+fn plugin_memory_query() {
+    on_host_runtime(async {
+        let plugin = WasmcloudSurrealdb::new();
+        let db = plugin
+            .get_or_create_connection(&memory_connection_key())
+            .await
+            .context("failed to connect in-memory SurrealDB")
+            .unwrap();
+        let guard = db.read().await;
+
+        query(
+            &guard,
+            "DEFINE TABLE person SCHEMALESS".to_string(),
+            Vec::new(),
+        )
+        .await
+        .context("define table")
+        .unwrap();
+
+        query(
+            &guard,
+            "CREATE person:demo CONTENT { name: 'demo', age: 42 }".to_string(),
+            Vec::new(),
+        )
+        .await
+        .context("create person")
+        .unwrap();
+
+        let results = query(&guard, "SELECT * FROM person".to_string(), Vec::new())
+            .await
+            .context("select person")
+            .unwrap();
+
+        let ok_rows = results.iter().filter(|r| r.is_ok()).count();
+        assert!(ok_rows > 0, "expected at least one ok result row");
+    });
+}
+
+#[test]
+fn live_select_reports_created_records() {
+    on_host_runtime(async {
+        let plugin = WasmcloudSurrealdb::new();
+        let db = plugin
+            .get_or_create_connection(&memory_connection_key())
+            .await
+            .context("failed to connect")
+            .unwrap();
+        let guard = db.read().await;
+
+        query(&guard, "DEFINE TABLE person SCHEMALESS".into(), vec![])
+            .await
+            .context("define table")
+            .unwrap();
+
+        let stream = subscribe(&guard, "LIVE SELECT * FROM person".into(), vec![])
+            .await
+            .context("subscribe")
+            .unwrap();
+        let mut stream = Box::pin(stream);
+
+        query(
+            &guard,
+            "CREATE person:demo SET name = 'demo'".into(),
+            vec![],
+        )
+        .await
+        .context("create person")
+        .unwrap();
+
+        let notification = tokio::time::timeout(Duration::from_secs(3), stream.next())
+            .await
+            .expect("a live notification within 3 seconds")
+            .expect("an open live stream")
+            .expect("a live notification");
+        let event = notification_to_live_event(7, notification).unwrap();
+        assert_eq!(event.subscription_id, 7);
+        assert!(matches!(event.action, LiveAction::Create));
+    });
+}
+
+#[test]
+fn live_select_on_undefined_table_fails() {
+    on_host_runtime(async {
+        let plugin = WasmcloudSurrealdb::new();
+        let db = plugin
+            .get_or_create_connection(&memory_connection_key())
+            .await
+            .unwrap();
+        let guard = db.read().await;
+
+        let result = subscribe(&guard, "LIVE SELECT * FROM missing".into(), vec![]).await;
+
+        assert!(
+            matches!(result, Err(SubscribeError::QueryExecution(_))),
+            "expected a query execution error"
+        );
+    });
 }

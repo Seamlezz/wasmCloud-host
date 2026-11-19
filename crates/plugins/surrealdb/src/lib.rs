@@ -28,6 +28,20 @@ pub(crate) mod bindings {
 
 pub const PLUGIN_SURREALDB_ID: &str = "wasmcloud-surrealdb";
 
+/// The stack SurrealDB asks of the tokio worker threads that run its embedded
+/// engine. The adapter runs every query and live query on a worker task, and a
+/// debug build overflows tokio's default 2 MiB on `DEFINE TABLE`.
+pub const WORKER_STACK_SIZE: usize = 10 * 1024 * 1024;
+
+/// The multi threaded tokio runtime a host serving this plugin runs on: every
+/// worker and blocking thread gets [`WORKER_STACK_SIZE`]. Embedded hosts, such
+/// as component tests, build their runtime here too.
+pub fn runtime_builder() -> tokio::runtime::Builder {
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    builder.enable_all().thread_stack_size(WORKER_STACK_SIZE);
+    builder
+}
+
 type SurrealConnection = Arc<RwLock<Surreal<Any>>>;
 type ConnectionPool = Arc<RwLock<HashMap<ConnectionKey, SurrealConnection>>>;
 

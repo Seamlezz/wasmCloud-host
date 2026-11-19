@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 use tracing::Level;
 use wash::cli::{CliContextBuilder, host::HostCommand};
 use wash_runtime::observability::{self, MeterKind};
-use wasmcloud_plugin_surrealdb::WasmcloudSurrealdb;
+use wasmcloud_plugin_surrealdb::{WasmcloudSurrealdb, runtime_builder};
 
 #[derive(Parser)]
 #[command(name = "wasmcloud-host", about = "wasmCloud host with SurrealDB")]
@@ -28,9 +28,11 @@ enum Command {
     Host(Box<HostCommand>),
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+fn main() -> anyhow::Result<()> {
+    runtime_builder().build()?.block_on(run(Cli::parse()))
+}
+
+async fn run(cli: Cli) -> anyhow::Result<()> {
     let shutdown = observability::initialize_observability(
         if cli.otel_debug {
             Level::DEBUG

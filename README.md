@@ -13,7 +13,7 @@ Guest components: [`surrealdb-component-sdk`](https://github.com/Seamlezz/surrea
 
 ## Prerequisites
 
-- Rust **1.95+** (see `rust-version` in root `Cargo.toml`)
+- Rust **1.100+** (see `rust-version` in root `Cargo.toml`)
 - [NATS](https://nats.io/) reachable from the host
 - wasmCloud operator or compatible scheduler on the same NATS cluster
 
@@ -27,7 +27,7 @@ cargo build --release -p wasmcloud-host-runtime
   --host-group=default
 ```
 
-The binary delegates host lifecycle, resource limits, probes, startup retries, and graceful shutdown to wasmCloud 2.10.3. The SurrealDB plugin is registered before host configuration is validated. Full flags: `wasmcloud-host host --help`.
+The binary delegates host lifecycle, resource limits, probes, startup retries, and graceful shutdown to wasmCloud 2.12.2. The SurrealDB plugin is registered before host configuration is validated. Full flags: `wasmcloud-host host --help`.
 
 ## SurrealDB on workloads
 
@@ -40,14 +40,17 @@ Add a `hostInterfaces` entry for `seamlezz:surrealdb/call@0.4.0` with:
 | `database` | yes | `app` |
 | `username` | no | root user |
 | `password` | no | required when `username` is set |
+| `level` | no | `root` (default), `namespace` or `database`: the scope `username` signs in at |
+
+Any key may come from a plugin backed `secrets:` entry instead of plain text. A secret `url` is never logged.
 
 ## Configuration
 
 Host flags require the `host` subcommand: `wasmcloud-host host [flags]`. Global flags include `--log-level`, `--verbose`, `--otel-debug`, `--meters`, and `--user-config`.
 
-Use `--user-config /path/to/wash.toml` for host controlled plugin bindings. The operator chart supplies this file. Native messaging uses `wasmcloud:nats@0.1.0`, including Core NATS and JetStream. Workload interfaces declare `core-subscriptions`; host bindings own credentials and subject grants.
+Use `--user-config /path/to/wash.toml` for host controlled plugin bindings. The operator chart supplies this file. Native messaging serves `wasmcloud:nats@0.1.3`, including Core NATS and JetStream, and accepts components importing `0.1.0`. Workload interfaces declare `core-subscriptions`; host bindings own credentials and subject grants.
 
-Scheduler and data connections accept `--scheduler-nats-creds` and `--data-nats-creds`, or `SCHEDULER_NATS_CREDENTIALS` and `DATA_NATS_CREDENTIALS`. The native NATS plugin independently receives its credential path through its host binding `creds` setting. TLS flags follow upstream `wash host --help`.
+Scheduler and data connections accept `--scheduler-nats-creds` and `--data-nats-creds`, or `WASH_SCHEDULER_NATS_CREDS` and `WASH_DATA_NATS_CREDS`. The native NATS plugin independently receives its credential path through its host binding `creds` setting. TLS flags follow upstream `wash host --help`.
 
 Auth callout uses the ordinary host subject grant `$SYS.REQ.USER.AUTH`. The fork removes the special `$SYS` prohibition. No custom identity selector or binding is required. Set `workloadConfig = "deny"` so workloads cannot replace host credentials or widen subject grants.
 

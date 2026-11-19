@@ -11,7 +11,7 @@ in
   languages.rust = {
     enable = true;
     channel = "stable";
-    version = "1.95.0"; # workspace rust-version
+    version = "1.100.0"; # workspace rust-version
     components = [ "rustc" "cargo" "clippy" "rustfmt" "rust-analyzer" ];
   };
 

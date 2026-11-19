@@ -1,16 +1,14 @@
 #![allow(clippy::unwrap_used)]
 
-use std::collections::HashMap;
-
 use anyhow::Context as _;
 use surrealdb_host_adapter::{query, subscribe};
 use wasmcloud_plugin_surrealdb::{ConnectionKey, WasmcloudSurrealdb};
 
 fn memory_connection_key() -> ConnectionKey {
-    ConnectionKey::from_config(&HashMap::from([
-        ("url".to_string(), "memory".to_string()),
-        ("namespace".to_string(), "test".to_string()),
-        ("database".to_string(), "test".to_string()),
+    ConnectionKey::from_config(&wash_runtime::wit::Config::from([
+        ("url", "memory"),
+        ("namespace", "test"),
+        ("database", "test"),
     ]))
     .expect("valid memory config")
 }

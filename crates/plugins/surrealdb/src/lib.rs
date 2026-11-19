@@ -198,7 +198,7 @@ impl HostPlugin for WasmcloudSurrealdb {
                 .add_component(component, ComponentBinding::new(key));
 
             bindings::seamlezz::surrealdb::call::add_to_linker::<_, SharedCtx>(
-                component.linker(),
+                component.linker()?,
                 extract_active_ctx,
             )
             .inspect_err(|error| {
@@ -294,10 +294,10 @@ mod lifecycle_tests {
     use wash_runtime::plugin::{HostPlugin, WitInterfaces, WorkloadTrackerItem};
 
     fn memory_connection_key() -> ConnectionKey {
-        ConnectionKey::from_config(&std::collections::HashMap::from([
-            ("url".to_string(), "memory".to_string()),
-            ("namespace".to_string(), "test".to_string()),
-            ("database".to_string(), "test".to_string()),
+        ConnectionKey::from_config(&wash_runtime::wit::Config::from([
+            ("url", "memory"),
+            ("namespace", "test"),
+            ("database", "test"),
         ]))
         .expect("valid memory config")
     }

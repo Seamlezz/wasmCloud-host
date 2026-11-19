@@ -1,11 +1,10 @@
-use std::collections::HashMap;
-
 use anyhow::{Context as _, bail};
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::{
     Database as DatabaseCredentials, Namespace as NamespaceCredentials, Root,
 };
+use wash_runtime::wit::{Config, ConfigStr};
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
 pub enum CredentialLevel {
@@ -23,16 +22,16 @@ impl CredentialLevel {
         }
     }
 
-    fn from_config(config: &HashMap<String, String>) -> anyhow::Result<Self> {
+    fn from_config(config: &Config) -> anyhow::Result<Self> {
         match config
-            .get("level")
-            .map(|v| v.trim())
+            .value("level")
+            .map(ConfigStr::trim)
             .filter(|v| !v.is_empty())
         {
             None => Ok(Self::Root),
-            Some(level) if level.eq_ignore_ascii_case("root") => Ok(Self::Root),
-            Some(level) if level.eq_ignore_ascii_case("namespace") => Ok(Self::Namespace),
-            Some(level) if level.eq_ignore_ascii_case("database") => Ok(Self::Database),
+            Some(level) if level.expose().eq_ignore_ascii_case("root") => Ok(Self::Root),
+            Some(level) if level.expose().eq_ignore_ascii_case("namespace") => Ok(Self::Namespace),
+            Some(level) if level.expose().eq_ignore_ascii_case("database") => Ok(Self::Database),
             Some(level) => bail!(
                 "seamlezz:surrealdb 'level' must be one of root, namespace, database, got '{level}'"
             ),
@@ -48,26 +47,34 @@ pub struct ConnectionKey {
     pub username: Option<String>,
     pub password: Option<String>,
     pub level: CredentialLevel,
+    /// Whether `url` came from a plugin secret, so logging never shows it.
+    url_secret: bool,
 }
 
 impl ConnectionKey {
     pub fn url_for_logging(&self) -> String {
+        if self.url_secret {
+            return "<redacted>".to_string();
+        }
         redact_url_credentials(&self.url)
     }
 
-    pub fn from_config(config: &HashMap<String, String>) -> anyhow::Result<Self> {
+    /// Reads the interface config. Every key may be plain text or a plugin
+    /// secret resolved from a `secrets:` entry.
+    pub fn from_config(config: &Config) -> anyhow::Result<Self> {
         let url = config
-            .get("url")
-            .context("seamlezz:surrealdb requires 'url' in host_interfaces config")?
-            .clone();
+            .value("url")
+            .context("seamlezz:surrealdb requires 'url' in host_interfaces config")?;
+        let url_secret = url.is_secret();
+        let url = url.expose().to_string();
         let namespace = config
-            .get("namespace")
+            .expose("namespace")
             .context("seamlezz:surrealdb requires 'namespace' in host_interfaces config")?
-            .clone();
+            .to_string();
         let database = config
-            .get("database")
+            .expose("database")
             .context("seamlezz:surrealdb requires 'database' in host_interfaces config")?
-            .clone();
+            .to_string();
 
         if url.is_empty() {
             bail!("seamlezz:surrealdb 'url' must not be empty");
@@ -79,8 +86,14 @@ impl ConnectionKey {
             bail!("seamlezz:surrealdb 'database' must not be empty");
         }
 
-        let username = config.get("username").cloned().filter(|v| !v.is_empty());
-        let password = config.get("password").cloned().filter(|v| !v.is_empty());
+        let username = config
+            .expose("username")
+            .filter(|v| !v.is_empty())
+            .map(str::to_string);
+        let password = config
+            .expose("password")
+            .filter(|v| !v.is_empty())
+            .map(str::to_string);
         let level = CredentialLevel::from_config(config)?;
 
         if username.is_some() && password.is_none() {
@@ -94,6 +107,7 @@ impl ConnectionKey {
             username,
             password,
             level,
+            url_secret,
         })
     }
 }
@@ -162,11 +176,10 @@ fn redact_url_credentials(url: &str) -> String {
 mod tests {
     use super::*;
 
-    fn config(pairs: &[(&str, &str)]) -> HashMap<String, String> {
-        pairs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect()
+    use wash_runtime::plugin::SecretValue;
+
+    fn config(pairs: &[(&str, &str)]) -> Config {
+        pairs.iter().map(|&(k, v)| (k, v)).collect()
     }
 
     #[test]
@@ -323,6 +336,7 @@ mod tests {
             username: None,
             password: None,
             level: CredentialLevel::Root,
+            url_secret: false,
         };
         assert_eq!(key.url_for_logging(), "ws://127.0.0.1:8000");
     }
@@ -336,7 +350,36 @@ mod tests {
             username: None,
             password: None,
             level: CredentialLevel::Root,
+            url_secret: false,
         };
         assert_eq!(key.url_for_logging(), "memory");
+    }
+
+    #[test]
+    fn credentials_from_plugin_secrets() {
+        let mut cfg = config(&[("url", "memory"), ("namespace", "ns"), ("database", "db")]);
+        cfg.insert("username", SecretValue::new("admin"));
+        cfg.insert("password", SecretValue::new("secret"));
+        let key = ConnectionKey::from_config(&cfg).unwrap();
+        assert_eq!(key.username.as_deref(), Some("admin"));
+        assert_eq!(key.password.as_deref(), Some("secret"));
+    }
+
+    #[test]
+    fn url_from_plugin_secret_is_never_logged() {
+        let mut cfg = config(&[("namespace", "ns"), ("database", "db")]);
+        cfg.insert("url", SecretValue::new("ws://127.0.0.1:8000"));
+        let key = ConnectionKey::from_config(&cfg).unwrap();
+        assert_eq!(key.url, "ws://127.0.0.1:8000");
+        assert_eq!(key.url_for_logging(), "<redacted>");
+    }
+
+    #[test]
+    fn invalid_secret_level_is_not_quoted() {
+        let mut cfg = config(&[("url", "memory"), ("namespace", "ns"), ("database", "db")]);
+        cfg.insert("level", SecretValue::new("record"));
+        let err = ConnectionKey::from_config(&cfg).unwrap_err();
+        assert!(err.to_string().contains("<redacted>"));
+        assert!(!err.to_string().contains("record"));
     }
 }

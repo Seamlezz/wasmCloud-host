@@ -23,8 +23,7 @@ impl CredentialLevel {
     }
 
     fn from_config(config: &Config) -> anyhow::Result<Self> {
-        match config
-            .value("level")
+        match optional(config, "level")?
             .map(ConfigStr::trim)
             .filter(|v| !v.is_empty())
         {
@@ -501,6 +500,16 @@ mod tests {
         );
         let err = ConnectionKey::from_config(&cfg).unwrap_err().to_string();
         assert!(err.contains("'url' must be text"), "{err}");
+    }
+
+    #[test]
+    fn non_text_secret_level_is_rejected() {
+        let cfg = secret_config(
+            &[("level", &[0xff])],
+            &[("url", "memory"), ("namespace", "ns"), ("database", "db")],
+        );
+        let err = ConnectionKey::from_config(&cfg).unwrap_err().to_string();
+        assert!(err.contains("'level' must be text"), "{err}");
     }
 
     #[tokio::test]

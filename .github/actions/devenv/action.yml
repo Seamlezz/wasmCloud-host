@@ -4,14 +4,14 @@ runs:
   using: composite
   steps:
     - uses: cachix/install-nix-action@v31
-    - uses: cachix/cachix-action@v16
+    - uses: cachix/cachix-action@v17
       with:
         name: devenv
-    - uses: nix-community/cache-nix-action@v6
+    - uses: nix-community/cache-nix-action@v7
       with:
         primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('devenv.nix', 'devenv.lock', 'devenv.yaml') }}
         restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-
-    - uses: actions/cache@v4
+    - uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/registry

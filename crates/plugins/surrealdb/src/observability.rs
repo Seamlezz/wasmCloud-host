@@ -10,8 +10,8 @@ pub fn record_error(span: &Span, slug: &'static str, message: impl AsRef<str>) {
 
 pub fn record_connection_key(span: &Span, key: &ConnectionKey) {
     span.record("surrealdb.url", key.url_for_logging().as_str());
-    span.record("surrealdb.namespace", key.namespace.as_str());
-    span.record("surrealdb.database", key.database.as_str());
+    span.record("surrealdb.namespace", key.namespace_for_logging());
+    span.record("surrealdb.database", key.database_for_logging());
     span.record("surrealdb.credential.level", key.level.as_str());
     span.record("surrealdb.auth.configured", key.username.is_some());
 }

@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 use tracing::Level;
 use wash::cli::{CliContextBuilder, host::HostCommand};
 use wash_runtime::observability::{self, MeterKind};
-use wasmcloud_plugin_surrealdb::WasmcloudSurrealdb;
+use wasmcloud_plugin_surrealdb::{WORKER_STACK_SIZE, WasmcloudSurrealdb, runtime_builder};
 
 #[derive(Parser)]
 #[command(name = "wasmcloud-host", about = "wasmCloud host with SurrealDB")]
@@ -28,9 +28,20 @@ enum Command {
     Host(Box<HostCommand>),
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    let runtime = runtime_builder().build()?;
+    // `block_on` polls the host on the calling thread, so that thread gets the
+    // worker stack SurrealDB needs too, whatever the main thread was given.
+    let host = std::thread::Builder::new()
+        .name("main".to_string())
+        .stack_size(WORKER_STACK_SIZE)
+        .spawn(move || runtime.block_on(run(cli)))?;
+    host.join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+}
+
+async fn run(cli: Cli) -> anyhow::Result<()> {
     let shutdown = observability::initialize_observability(
         if cli.otel_debug {
             Level::DEBUG

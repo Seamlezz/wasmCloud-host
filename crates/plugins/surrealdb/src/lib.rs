@@ -28,7 +28,21 @@ pub(crate) mod bindings {
 
 pub const PLUGIN_SURREALDB_ID: &str = "wasmcloud-surrealdb";
 
-type SurrealConnection = Arc<RwLock<Surreal<Any>>>;
+/// The stack SurrealDB asks of the tokio worker threads that run its embedded
+/// engine. The adapter runs every query and live query on a worker task, and a
+/// debug build overflows tokio's default 2 MiB on `DEFINE TABLE`.
+pub const WORKER_STACK_SIZE: usize = 10 * 1024 * 1024;
+
+/// The multi threaded tokio runtime a host serving this plugin runs on: every
+/// worker and blocking thread gets [`WORKER_STACK_SIZE`]. Embedded hosts, such
+/// as component tests, build their runtime here too.
+pub fn runtime_builder() -> tokio::runtime::Builder {
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    builder.enable_all().thread_stack_size(WORKER_STACK_SIZE);
+    builder
+}
+
+type SurrealConnection = Arc<Surreal<Any>>;
 type ConnectionPool = Arc<RwLock<HashMap<ConnectionKey, SurrealConnection>>>;
 
 #[derive(Clone)]
@@ -62,17 +76,20 @@ impl WasmcloudSurrealdb {
         }
     }
 
+    /// The pooled client for `key`, connecting it on first use. Statements
+    /// sent through it run in its session, which holds the namespace,
+    /// database and sign in; cloning the `Surreal` would open a new session.
     pub async fn get_or_create_connection(
         &self,
         key: &ConnectionKey,
-    ) -> anyhow::Result<Arc<RwLock<Surreal<Any>>>> {
+    ) -> anyhow::Result<Arc<Surreal<Any>>> {
         let mut connections = self.connections.write().await;
         if let Some(existing) = connections.get(key).cloned() {
             return Ok(existing);
         }
 
         let db = config::connect(key).await?;
-        let wrapped = Arc::new(RwLock::new(db));
+        let wrapped = Arc::new(db);
         connections.insert(key.clone(), Arc::clone(&wrapped));
         Ok(wrapped)
     }
@@ -198,7 +215,7 @@ impl HostPlugin for WasmcloudSurrealdb {
                 .add_component(component, ComponentBinding::new(key));
 
             bindings::seamlezz::surrealdb::call::add_to_linker::<_, SharedCtx>(
-                component.linker(),
+                component.linker()?,
                 extract_active_ctx,
             )
             .inspect_err(|error| {
@@ -294,10 +311,10 @@ mod lifecycle_tests {
     use wash_runtime::plugin::{HostPlugin, WitInterfaces, WorkloadTrackerItem};
 
     fn memory_connection_key() -> ConnectionKey {
-        ConnectionKey::from_config(&std::collections::HashMap::from([
-            ("url".to_string(), "memory".to_string()),
-            ("namespace".to_string(), "test".to_string()),
-            ("database".to_string(), "test".to_string()),
+        ConnectionKey::from_config(&wash_runtime::wit::Config::from([
+            ("url", "memory"),
+            ("namespace", "test"),
+            ("database", "test"),
         ]))
         .expect("valid memory config")
     }

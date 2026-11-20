@@ -6,7 +6,7 @@ use opentelemetry::trace::{TraceContextExt as _, TraceState};
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
-use tokio::sync::{RwLock, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 use tracing::{Instrument, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use wasmtime::component::{Accessor, StreamReader};
@@ -113,7 +113,7 @@ fn to_binding_statement_error(error: AdapterStatementError) -> BindingStatementE
 async fn resolve_db(
     plugin: Arc<WasmcloudSurrealdb>,
     component_id: &str,
-) -> anyhow::Result<(ConnectionKey, Arc<RwLock<Surreal<Any>>>)> {
+) -> anyhow::Result<(ConnectionKey, Arc<Surreal<Any>>)> {
     let key = plugin
         .tracker
         .read()
@@ -165,6 +165,7 @@ fn map_query_error(error: QueryError) -> BindingQueryFailure {
             record_span_error("surrealdb-query-failed", "query execution failed");
             source.to_string()
         }
+        QueryError::TaskFailed(message) => task_failed(&message),
     };
     BindingQueryFailure { message }
 }
@@ -188,7 +189,15 @@ fn map_subscribe_error(error: SubscribeError) -> wasmtime::Error {
             );
             wasmtime::Error::msg(message)
         }
+        SubscribeError::TaskFailed(message) => wasmtime::Error::msg(task_failed(&message)),
     }
+}
+
+/// The adapter runs database work on a task of its own; it fails when that
+/// task panics or its runtime shuts down.
+fn task_failed(message: &str) -> String {
+    record_span_error("surrealdb-task-failed", "database task failed");
+    format!("database task failed: {message}")
 }
 
 fn query_span(component_id: &str, query_len: usize, params_count: usize) -> Span {
@@ -234,8 +243,7 @@ async fn execute_query(
         };
         record_connection_key(&key);
 
-        let guard = db.read().await;
-        let result = surrealdb_host_adapter::query(&guard, query, params)
+        let result = surrealdb_host_adapter::query(db, query, params)
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -295,12 +303,9 @@ async fn execute_subscribe(
         let subscription_id = subscriptions.allocate_id();
         Span::current().record("surrealdb.subscription_id", subscription_id);
 
-        let stream = {
-            let guard = db.read().await;
-            surrealdb_host_adapter::subscribe(&guard, query, params)
-                .await
-                .map_err(map_subscribe_error)?
-        };
+        let stream = surrealdb_host_adapter::subscribe(db, query, params)
+            .await
+            .map_err(map_subscribe_error)?;
 
         let (sender, receiver) = mpsc::unbounded_channel();
         let (stop_tx, mut stop_rx) = oneshot::channel();
@@ -538,6 +543,105 @@ mod tests {
             to_binding_statement_error(AdapterStatementError::Failure("failure".into())),
             BindingStatementError::Failure(message) if message == "failure"
         ));
+    }
+
+    /// The bytes of the first statement result of a guest query.
+    async fn guest_query(
+        plugin: &Arc<WasmcloudSurrealdb>,
+        component_id: &str,
+        query: &str,
+    ) -> Vec<u8> {
+        let rows = execute_query(
+            Arc::clone(plugin),
+            component_id.to_string(),
+            None,
+            query.to_string(),
+            Vec::new(),
+        )
+        .await
+        .expect("no trap")
+        .unwrap_or_else(|failure| panic!("query failed: {}", failure.message));
+        match rows.into_iter().next() {
+            Some(Ok(bytes)) => bytes,
+            _ => panic!("expected one successful statement"),
+        }
+    }
+
+    #[test]
+    fn guest_calls_share_the_pooled_session() {
+        crate::runtime_builder()
+            .build()
+            .expect("host runtime")
+            .block_on(async {
+                tokio::spawn(async {
+                    let plugin = Arc::new(WasmcloudSurrealdb::new());
+                    let key = ConnectionKey::from_config(&wash_runtime::wit::Config::from([
+                        ("url", "memory"),
+                        ("namespace", "test"),
+                        ("database", "test"),
+                    ]))
+                    .expect("valid memory config");
+                    {
+                        let mut tracker = plugin.tracker.write().await;
+                        tracker
+                            .workloads
+                            .entry("workload".to_string())
+                            .or_insert_with(|| wash_runtime::plugin::WorkloadTrackerItem {
+                                workload_data: None,
+                                components: std::collections::HashMap::new(),
+                            })
+                            .components
+                            .insert("component".to_string(), crate::ComponentBinding::new(key));
+                        tracker
+                            .components
+                            .insert("component".to_string(), "workload".to_string());
+                    }
+
+                    let first = guest_query(&plugin, "component", "RETURN session::id()").await;
+                    let second = guest_query(&plugin, "component", "RETURN session::id()").await;
+                    assert_eq!(first, second, "each guest call opened a new session");
+                })
+                .await
+                .expect("test task");
+            });
+    }
+
+    fn has_slug(span: &opentelemetry_sdk::trace::SpanData, slug: &str) -> bool {
+        span.attributes.iter().any(|attribute| {
+            attribute.key.as_str() == "exception.slug" && attribute.value.as_str() == slug
+        })
+    }
+
+    #[test]
+    fn failed_database_task_reaches_the_guest_and_the_span() {
+        let (dispatch, exporter, provider) = test_dispatch();
+
+        let (query_failure, subscribe_failure) =
+            tracing::dispatcher::with_default(&dispatch, || {
+                let query_failure = {
+                    let span = query_span("component", 12, 0);
+                    let _guard = span.enter();
+                    map_query_error(QueryError::TaskFailed("query boom".into()))
+                };
+                let subscribe_failure = {
+                    let span = subscribe_span("component", 12, 0);
+                    let _guard = span.enter();
+                    map_subscribe_error(SubscribeError::TaskFailed("subscribe boom".into()))
+                };
+                (query_failure, subscribe_failure)
+            });
+        provider.force_flush().expect("flush spans");
+
+        assert_eq!(query_failure.message, "database task failed: query boom");
+        assert_eq!(
+            subscribe_failure.to_string(),
+            "database task failed: subscribe boom"
+        );
+        let spans = exporter.get_finished_spans().expect("finished spans");
+        for name in ["execute_query", "execute_subscribe"] {
+            let span = spans.iter().find(|span| span.name == name).unwrap();
+            assert!(has_slug(span, "surrealdb-task-failed"), "{name}");
+        }
     }
 
     #[test]

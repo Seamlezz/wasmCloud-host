@@ -48,12 +48,12 @@ The plugin runs SurrealDB 4. `LIVE SELECT` on a table that is not defined fails,
 
 ### Embedding the plugin
 
-The SurrealDB host adapter runs every query and live query on a tokio task of its own, and SurrealDB needs 10 MiB worker stacks; a debug build overflows tokio's default 2 MiB on `DEFINE TABLE`. The binary builds its runtime with `wasmcloud_plugin_surrealdb::runtime_builder()`. A process that embeds the plugin, such as a component test host, builds its runtime the same way:
+The SurrealDB host adapter runs every query and live query on a tokio task of its own, and SurrealDB needs 10 MiB worker stacks; a debug build overflows tokio's default 2 MiB on `DEFINE TABLE`. The binary builds its runtime with `wasmcloud_plugin_surrealdb::runtime_builder()` and calls `block_on` from a thread with `WORKER_STACK_SIZE`, because `block_on` polls on the calling thread, whose stack may be smaller. A process that embeds the plugin, such as a component test host, builds the same runtime and runs its SurrealDB work off the calling thread, for example on a spawned task:
 
 ```rust
 wasmcloud_plugin_surrealdb::runtime_builder()
     .build()?
-    .block_on(run())
+    .block_on(async { tokio::spawn(run()).await })?
 ```
 
 ## Configuration

@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
 use std::future::Future;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
@@ -36,10 +37,9 @@ fn host_runtime_runs_schema_definitions() {
             .get_or_create_connection(&memory_connection_key())
             .await
             .unwrap();
-        let guard = db.read().await;
 
         let results = query(
-            &guard,
+            Arc::clone(&db),
             "DEFINE TABLE person SCHEMALESS".to_string(),
             Vec::new(),
         )
@@ -60,10 +60,9 @@ fn plugin_memory_query() {
             .await
             .context("failed to connect in-memory SurrealDB")
             .unwrap();
-        let guard = db.read().await;
 
         query(
-            &guard,
+            Arc::clone(&db),
             "DEFINE TABLE person SCHEMALESS".to_string(),
             Vec::new(),
         )
@@ -72,7 +71,7 @@ fn plugin_memory_query() {
         .unwrap();
 
         query(
-            &guard,
+            Arc::clone(&db),
             "CREATE person:demo CONTENT { name: 'demo', age: 42 }".to_string(),
             Vec::new(),
         )
@@ -80,10 +79,14 @@ fn plugin_memory_query() {
         .context("create person")
         .unwrap();
 
-        let results = query(&guard, "SELECT * FROM person".to_string(), Vec::new())
-            .await
-            .context("select person")
-            .unwrap();
+        let results = query(
+            Arc::clone(&db),
+            "SELECT * FROM person".to_string(),
+            Vec::new(),
+        )
+        .await
+        .context("select person")
+        .unwrap();
 
         let ok_rows = results.iter().filter(|r| r.is_ok()).count();
         assert!(ok_rows > 0, "expected at least one ok result row");
@@ -99,21 +102,24 @@ fn live_select_reports_created_records() {
             .await
             .context("failed to connect")
             .unwrap();
-        let guard = db.read().await;
 
-        query(&guard, "DEFINE TABLE person SCHEMALESS".into(), vec![])
-            .await
-            .context("define table")
-            .unwrap();
+        query(
+            Arc::clone(&db),
+            "DEFINE TABLE person SCHEMALESS".into(),
+            vec![],
+        )
+        .await
+        .context("define table")
+        .unwrap();
 
-        let stream = subscribe(&guard, "LIVE SELECT * FROM person".into(), vec![])
+        let stream = subscribe(Arc::clone(&db), "LIVE SELECT * FROM person".into(), vec![])
             .await
             .context("subscribe")
             .unwrap();
         let mut stream = Box::pin(stream);
 
         query(
-            &guard,
+            Arc::clone(&db),
             "CREATE person:demo SET name = 'demo'".into(),
             vec![],
         )
@@ -140,9 +146,8 @@ fn live_select_on_undefined_table_fails() {
             .get_or_create_connection(&memory_connection_key())
             .await
             .unwrap();
-        let guard = db.read().await;
 
-        let result = subscribe(&guard, "LIVE SELECT * FROM missing".into(), vec![]).await;
+        let result = subscribe(Arc::clone(&db), "LIVE SELECT * FROM missing".into(), vec![]).await;
 
         assert!(
             matches!(result, Err(SubscribeError::QueryExecution(_))),

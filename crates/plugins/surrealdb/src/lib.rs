@@ -42,7 +42,7 @@ pub fn runtime_builder() -> tokio::runtime::Builder {
     builder
 }
 
-type SurrealConnection = Arc<RwLock<Surreal<Any>>>;
+type SurrealConnection = Arc<Surreal<Any>>;
 type ConnectionPool = Arc<RwLock<HashMap<ConnectionKey, SurrealConnection>>>;
 
 #[derive(Clone)]
@@ -76,17 +76,20 @@ impl WasmcloudSurrealdb {
         }
     }
 
+    /// The pooled client for `key`, connecting it on first use. Statements
+    /// sent through it run in its session, which holds the namespace,
+    /// database and sign in; cloning the `Surreal` would open a new session.
     pub async fn get_or_create_connection(
         &self,
         key: &ConnectionKey,
-    ) -> anyhow::Result<Arc<RwLock<Surreal<Any>>>> {
+    ) -> anyhow::Result<Arc<Surreal<Any>>> {
         let mut connections = self.connections.write().await;
         if let Some(existing) = connections.get(key).cloned() {
             return Ok(existing);
         }
 
         let db = config::connect(key).await?;
-        let wrapped = Arc::new(RwLock::new(db));
+        let wrapped = Arc::new(db);
         connections.insert(key.clone(), Arc::clone(&wrapped));
         Ok(wrapped)
     }

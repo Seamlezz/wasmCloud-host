@@ -21,7 +21,7 @@ surrealdb = {
   default-features = false,
   features = ["kv-mem", "protocol-http", "protocol-ws", "rustls"]
 }
-surrealdb-host-adapter = { git = "https://github.com/Seamlezz/surrealdb-wasi-component", rev = "bb0f0a38971832135cb3b1720e4f015a756fe406" }
+surrealdb-host-adapter = { git = "https://github.com/Seamlezz/surrealdb-wasi-component", rev = "6357b6d0bcc065f152f202f34f2f58525d1a961a" }
 surrealdb-types = "4"
 tokio = { version = "1", default-features = false, features = ["full"] }
 tracing = {

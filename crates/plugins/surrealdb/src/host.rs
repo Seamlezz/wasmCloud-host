@@ -6,7 +6,7 @@ use opentelemetry::trace::{TraceContextExt as _, TraceState};
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
-use tokio::sync::{RwLock, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 use tracing::{Instrument, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use wasmtime::component::{Accessor, StreamReader};
@@ -113,7 +113,7 @@ fn to_binding_statement_error(error: AdapterStatementError) -> BindingStatementE
 async fn resolve_db(
     plugin: Arc<WasmcloudSurrealdb>,
     component_id: &str,
-) -> anyhow::Result<(ConnectionKey, Arc<RwLock<Surreal<Any>>>)> {
+) -> anyhow::Result<(ConnectionKey, Arc<Surreal<Any>>)> {
     let key = plugin
         .tracker
         .read()
@@ -243,8 +243,7 @@ async fn execute_query(
         };
         record_connection_key(&key);
 
-        let guard = db.read().await;
-        let result = surrealdb_host_adapter::query(&guard, query, params)
+        let result = surrealdb_host_adapter::query(db, query, params)
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -304,12 +303,9 @@ async fn execute_subscribe(
         let subscription_id = subscriptions.allocate_id();
         Span::current().record("surrealdb.subscription_id", subscription_id);
 
-        let stream = {
-            let guard = db.read().await;
-            surrealdb_host_adapter::subscribe(&guard, query, params)
-                .await
-                .map_err(map_subscribe_error)?
-        };
+        let stream = surrealdb_host_adapter::subscribe(db, query, params)
+            .await
+            .map_err(map_subscribe_error)?;
 
         let (sender, receiver) = mpsc::unbounded_channel();
         let (stop_tx, mut stop_rx) = oneshot::channel();
@@ -547,6 +543,67 @@ mod tests {
             to_binding_statement_error(AdapterStatementError::Failure("failure".into())),
             BindingStatementError::Failure(message) if message == "failure"
         ));
+    }
+
+    /// The bytes of the first statement result of a guest query.
+    async fn guest_query(
+        plugin: &Arc<WasmcloudSurrealdb>,
+        component_id: &str,
+        query: &str,
+    ) -> Vec<u8> {
+        let rows = execute_query(
+            Arc::clone(plugin),
+            component_id.to_string(),
+            None,
+            query.to_string(),
+            Vec::new(),
+        )
+        .await
+        .expect("no trap")
+        .unwrap_or_else(|failure| panic!("query failed: {}", failure.message));
+        match rows.into_iter().next() {
+            Some(Ok(bytes)) => bytes,
+            _ => panic!("expected one successful statement"),
+        }
+    }
+
+    #[test]
+    fn guest_calls_share_the_pooled_session() {
+        crate::runtime_builder()
+            .build()
+            .expect("host runtime")
+            .block_on(async {
+                tokio::spawn(async {
+                    let plugin = Arc::new(WasmcloudSurrealdb::new());
+                    let key = ConnectionKey::from_config(&wash_runtime::wit::Config::from([
+                        ("url", "memory"),
+                        ("namespace", "test"),
+                        ("database", "test"),
+                    ]))
+                    .expect("valid memory config");
+                    {
+                        let mut tracker = plugin.tracker.write().await;
+                        tracker
+                            .workloads
+                            .entry("workload".to_string())
+                            .or_insert_with(|| wash_runtime::plugin::WorkloadTrackerItem {
+                                workload_data: None,
+                                components: std::collections::HashMap::new(),
+                            })
+                            .components
+                            .insert("component".to_string(), crate::ComponentBinding::new(key));
+                        tracker
+                            .components
+                            .insert("component".to_string(), "workload".to_string());
+                    }
+
+                    let first = guest_query(&plugin, "component", "RETURN session::id()").await;
+                    let second = guest_query(&plugin, "component", "RETURN session::id()").await;
+                    assert_eq!(first, second, "each guest call opened a new session");
+                })
+                .await
+                .expect("test task");
+            });
     }
 
     fn has_slug(span: &opentelemetry_sdk::trace::SpanData, slug: &str) -> bool {
